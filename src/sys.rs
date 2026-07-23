@@ -149,6 +149,21 @@ pub unsafe fn wait4(pid: i32) -> i32 {
     status
 }
 
+const SYS_MEMBARRIER: usize = 324;
+
+/// `MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED_RSEQ`: must succeed once per
+/// process before the fence may be used.
+pub const MEMBARRIER_REGISTER_RSEQ: usize = 256;
+/// `MEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ`: on return, every thread of this
+/// process that was inside an rseq critical section has been restarted.
+pub const MEMBARRIER_FENCE_RSEQ: usize = 128;
+
+/// membarrier(2). Returns 0 on success, negative errno otherwise.
+#[must_use]
+pub fn membarrier(cmd: usize) -> isize {
+    unsafe { syscall6(SYS_MEMBARRIER, [cmd, 0, 0, 0, 0, 0]) }
+}
+
 /// Restrict `pid` to the CPUs in `mask` (bit per CPU, single word). A
 /// stopped task is migrated immediately, which records an rseq migration
 /// event for it.

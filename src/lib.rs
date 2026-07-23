@@ -11,6 +11,8 @@
 pub mod check;
 #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
 pub mod codegen;
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+pub mod drain;
 pub mod ir;
 pub mod progs;
 #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]

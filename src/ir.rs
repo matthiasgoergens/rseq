@@ -4,7 +4,7 @@
 //! rseq critical section must have:
 //!
 //! - a side-effect-free prefix of loads and register arithmetic,
-//! - at most one branch-to-exit,
+//! - any number of early-exit branches (each leaves the window uncommitted),
 //! - writes to *scratch* (unpublished) memory anywhere before the commit,
 //! - exactly one committing store, which is the final operation.
 //!
@@ -218,7 +218,6 @@ pub enum ValidateError {
     Empty,
     CommitNotLast { at: usize },
     MissingCommit,
-    MultipleExits { at: usize },
     UnknownRegion { at: usize, region: RegionId },
     ScratchStoreToPublished { at: usize, region: RegionId },
     CommitToScratch { region: RegionId },
@@ -258,7 +257,6 @@ impl Program {
                 Ok(())
             }
         };
-        let mut seen_exit = false;
         let last = self.ops.len() - 1;
         for (at, op) in self.ops.iter().enumerate() {
             match *op {
@@ -284,11 +282,10 @@ impl Program {
                     check_use(at, rhs, &defined)?;
                     defined[dst] = true;
                 }
+                // Any number of exit branches is fine: each jumps out of
+                // the window without committing; the invariants that matter
+                // are the single terminal commit and prefix purity.
                 Op::ExitIf { lhs, rhs, .. } => {
-                    if seen_exit {
-                        return Err(ValidateError::MultipleExits { at });
-                    }
-                    seen_exit = true;
                     check_use(at, lhs, &defined)?;
                     check_use(at, rhs, &defined)?;
                 }

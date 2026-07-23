@@ -99,6 +99,66 @@ impl Freelist {
     }
 }
 
+pub struct LockableFreelist {
+    pub layout: Layout,
+    pub locks: RegionId,
+    pub heads: RegionId,
+    pub nodes: RegionId,
+    pub nnodes: usize,
+}
+
+/// A freelist whose sequences honour a per-CPU drain lock: every sequence
+/// loads `locks[cpu]` inside the window and exits early if it is set. A
+/// drainer that sets the lock and then fires the rseq membarrier fence
+/// (restarting any sequence that could have read the old value) owns that
+/// CPU's list outright until it clears the lock — the tcmalloc `FenceCpu`
+/// protocol. The lock word is published: the sequences only read it; the
+/// drainer writes it from outside.
+#[must_use]
+#[allow(clippy::similar_names)]
+pub fn lockable_freelist(nnodes: usize) -> LockableFreelist {
+    let mut layout = Layout::new();
+    let locks = layout.published_per_cpu("locks", 1, 0);
+    let heads = layout.published_per_cpu("heads", 1, NIL);
+    let nodes = layout.scratch_shared("nodes", nnodes, NIL);
+    LockableFreelist {
+        layout,
+        locks,
+        heads,
+        nodes,
+        nnodes,
+    }
+}
+
+impl LockableFreelist {
+    /// Push runtime parameter 0; exits early (without committing) if the
+    /// current CPU is locked by a drainer.
+    #[must_use]
+    pub fn push(&self) -> Program {
+        let mut b = SeqBuilder::new("lockable_push");
+        let cpu = b.cpu_id();
+        let lk = b.load(self.locks, reg(cpu));
+        b.exit_if(Cond::Ne, reg(lk), imm(0));
+        let node = b.param(0);
+        let head = b.load(self.heads, reg(cpu));
+        b.store_scratch(self.nodes, reg(node), reg(head));
+        b.commit(self.heads, reg(cpu), reg(node))
+    }
+
+    /// Pop from the current CPU's list; exits early if locked or empty.
+    #[must_use]
+    pub fn pop(&self) -> Program {
+        let mut b = SeqBuilder::new("lockable_pop");
+        let cpu = b.cpu_id();
+        let lk = b.load(self.locks, reg(cpu));
+        b.exit_if(Cond::Ne, reg(lk), imm(0));
+        let head = b.load(self.heads, reg(cpu));
+        b.exit_if(Cond::Eq, reg(head), imm(NIL));
+        let next = b.load(self.nodes, reg(head));
+        b.commit_ret(self.heads, reg(cpu), reg(next), reg(head))
+    }
+}
+
 pub struct PushArray {
     pub layout: Layout,
     pub committed: RegionId,

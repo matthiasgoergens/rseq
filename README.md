@@ -118,6 +118,20 @@ live kernel.
    high thread counts and nothing single-threaded, and abort rates are
    ~2e-7 per op under oversubscription, zero otherwise.
 
+6. **Cross-CPU draining** (done): the tcmalloc `FenceCpu` protocol. Every
+   sequence of the lockable freelist checks a per-CPU drain lock inside its
+   window and exits early if set; a drainer takes the lock, fires
+   `MEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ` (restarting any in-flight
+   sequence that could have read the old lock value), then owns that CPU's
+   list outright until it unlocks. The lock-guarded programs are
+   model-checked like everything else (locked CPUs never commit, unlocked
+   behave identically), and the live-kernel stress test makes the fence
+   load-bearing: a continuous drainer races pop/push workers, and the
+   end-state conservation law would break if the fence failed to restart a
+   stale-read sequence. Multiple exit branches per program (locked, empty)
+   are now allowed by the validator — each just leaves the window
+   uncommitted.
+
 ## Running
 
 ```

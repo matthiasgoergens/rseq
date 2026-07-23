@@ -334,15 +334,75 @@ fn validation_rejects_malformed_programs() {
         Err(ValidateError::CommitToScratch { region: fl.nodes })
     );
 
+    // Multiple exit branches are legal: each leaves the window uncommitted
+    // (the lockable freelist pop needs two — locked and empty).
     let mut b = rseq::ir::SeqBuilder::new("two_exits");
     let cpu = b.cpu_id();
     b.exit_if(rseq::ir::Cond::Eq, reg(cpu), imm(9));
     b.exit_if(rseq::ir::Cond::Eq, reg(cpu), imm(8));
     let two_exits = b.commit(counters, reg(cpu), imm(1));
-    assert_eq!(
-        two_exits.validate(&layout),
-        Err(ValidateError::MultipleExits { at: 2 })
-    );
+    assert_eq!(two_exits.validate(&layout), Ok(()));
+}
+
+fn llists(mem: &Memory, fl: &progs::LockableFreelist) -> Vec<Vec<u64>> {
+    (0..mem.ncpus())
+        .map(|c| {
+            let mut out = Vec::new();
+            let mut cur = mem.region(fl.heads)[c];
+            let mut fuel = fl.nnodes + 1;
+            while cur != NIL && fuel > 0 {
+                out.push(cur);
+                cur = mem.region(fl.nodes)[cur as usize];
+                fuel -= 1;
+            }
+            out
+        })
+        .collect()
+}
+
+#[test]
+fn lockable_freelist_unlocked_behaves_normally() {
+    let fl = progs::lockable_freelist(8);
+    for prog in [fl.push(), fl.pop()] {
+        check::check(
+            &prog,
+            &fl.layout,
+            |mem: &mut Memory| {
+                mem.region_mut(fl.heads)[0] = 0;
+                mem.region_mut(fl.nodes)[0] = NIL;
+            },
+            |mem| llists(mem, &fl),
+            &[5],
+            CheckConfig::default(),
+        )
+        .unwrap_or_else(|e| panic!("{} must check unlocked: {e:?}", prog.name));
+    }
+}
+
+#[test]
+fn lockable_freelist_locked_cpu_never_commits() {
+    let fl = progs::lockable_freelist(8);
+    // CPU 1 is locked by a drainer; sequences ending there must exit
+    // without committing, everywhere else business as usual. The checker's
+    // per-final-CPU reference handles the mixed case automatically.
+    let setup = |mem: &mut Memory| {
+        mem.region_mut(fl.locks)[1] = 1;
+        mem.region_mut(fl.heads)[0] = 0;
+        mem.region_mut(fl.nodes)[0] = NIL;
+        mem.region_mut(fl.heads)[1] = 1;
+        mem.region_mut(fl.nodes)[1] = NIL;
+    };
+    for prog in [fl.push(), fl.pop()] {
+        check::check(
+            &prog,
+            &fl.layout,
+            setup,
+            |mem| (llists(mem, &fl), mem.region(fl.locks).to_vec()),
+            &[5],
+            CheckConfig::default(),
+        )
+        .unwrap_or_else(|e| panic!("{} must check with cpu 1 locked: {e:?}", prog.name));
+    }
 }
 
 #[test]
