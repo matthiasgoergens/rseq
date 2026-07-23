@@ -12,9 +12,7 @@ use std::thread;
 use rseq::rt::{self, PerCpuCounter, PerCpuFreelist};
 
 fn threads() -> usize {
-    2 * thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4)
+    2 * thread::available_parallelism().map_or(4, std::num::NonZero::get)
 }
 
 #[test]

@@ -69,9 +69,7 @@ fn drain_stress_conserves_nodes() {
     for node in 0..NNODES {
         fl.push(node);
     }
-    let nworkers = 2 * thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4);
+    let nworkers = 2 * thread::available_parallelism().map_or(4, std::num::NonZero::get);
     thread::scope(|s| {
         for _ in 0..nworkers {
             s.spawn(|| {

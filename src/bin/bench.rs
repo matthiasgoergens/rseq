@@ -294,16 +294,14 @@ mod real {
     }
 
     fn next_block_id(path: &str) -> u64 {
-        fs::read_to_string(path)
-            .map(|s| {
-                s.lines()
-                    .filter(|l| !l.starts_with('#') && !l.starts_with("block"))
-                    .filter_map(|l| l.split(',').next())
-                    .filter_map(|b| b.parse::<u64>().ok())
-                    .max()
-                    .map_or(0, |m| m + 1)
-            })
-            .unwrap_or(0)
+        fs::read_to_string(path).map_or(0, |s| {
+            s.lines()
+                .filter(|l| !l.starts_with('#') && !l.starts_with("block"))
+                .filter_map(|l| l.split(',').next())
+                .filter_map(|b| b.parse::<u64>().ok())
+                .max()
+                .map_or(0, |m| m + 1)
+        })
     }
 
     fn run_counter(blocks: u64, ops: u64, path: &str) {
