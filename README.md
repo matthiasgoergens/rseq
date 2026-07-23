@@ -22,9 +22,16 @@ The design here is one IR with three backends:
    checker failures: a hoisted (stale) CPU id surfaces as a foreign commit
    under migration, and an abort window that wrongly includes the committing
    store surfaces as a double commit.
-2. **Codegen** (next): the same IR emits an asm template plus its `rseq_cs`
+2. **Live-kernel runtime spike** (done): hand-written x86-64 sequences
+   (per-CPU counter, freelist push/pop) with their `rseq_cs` descriptors,
+   riding glibc's auto-registration via `__rseq_offset`. Oversubscribed
+   stress tests exercise the real abort/retry path and assert conservation
+   laws that any lost or doubled commit would break. These are the bytes the
+   IR backend must learn to emit, and their tests are the harness generated
+   code must pass.
+3. **Codegen** (next): the same IR emits the asm template plus its `rseq_cs`
    descriptor.
-3. **ptrace conformance harness** (later): single-step the real binary to
+4. **ptrace conformance harness** (later): single-step the real binary to
    every abort point and inject signals/migrations against the live kernel,
    closing the gap between the checked IR and the linked bytes.
 
