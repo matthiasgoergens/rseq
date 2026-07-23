@@ -49,7 +49,7 @@ fn compiled_matches_simulator_on_shared_region() {
     // Real execution.
     let seq = CompiledSeq::compile(&prog, &layout).expect("compiles");
     let mut rs = RegionSet::new(&layout);
-    let got = rs.call(&seq, &[]).expect("rseq available");
+    let got = unsafe { rs.call(&seq, &[]) }.expect("rseq available");
     assert_eq!(got, 17);
     assert_eq!(rs.region_mut(cell)[0], mem.region(cell)[0]);
 }
@@ -76,7 +76,7 @@ fn compiled_param_and_shifts_match_simulator() {
 
     let seq = CompiledSeq::compile(&prog, &layout).expect("compiles");
     let mut rs = RegionSet::new(&layout);
-    let got = rs.call(&seq, &params).expect("rseq available");
+    let got = unsafe { rs.call(&seq, &params) }.expect("rseq available");
     assert_eq!(Outcome::Committed { ret: Some(got) }, want.outcome);
     assert_eq!(rs.region_mut(cell)[2], mem.region(cell)[2]);
 }
@@ -97,7 +97,7 @@ fn compiled_counter_stress_conserves_increments() {
         for _ in 0..nthreads {
             s.spawn(|| {
                 for _ in 0..ITERS {
-                    rs.call(&seq, &[]).expect("rseq available");
+                    unsafe { rs.call(&seq, &[]) }.expect("rseq available");
                 }
             });
         }
@@ -121,16 +121,16 @@ fn compiled_freelist_stress_conserves_nodes() {
     let pop = CompiledSeq::compile(&fl.pop(), &fl.layout).expect("pop compiles");
     let mut rs = RegionSet::new(&fl.layout);
     for node in 0..NNODES {
-        rs.call(&push, &[node]).expect("rseq available");
+        unsafe { rs.call(&push, &[node]) }.expect("rseq available");
     }
     let nthreads = threads();
     thread::scope(|s| {
         for _ in 0..nthreads {
             s.spawn(|| {
                 for i in 0..ITERS {
-                    let node = rs.call(&pop, &[]).expect("rseq available");
+                    let node = unsafe { rs.call(&pop, &[]) }.expect("rseq available");
                     if node != EXITED {
-                        rs.call(&push, &[node]).expect("rseq available");
+                        unsafe { rs.call(&push, &[node]) }.expect("rseq available");
                     }
                     if i % 1024 == 0 {
                         thread::yield_now();
@@ -169,7 +169,7 @@ fn compiled_array_push_publishes_consistently() {
     let mut rs = RegionSet::new(&pa.layout);
     let mut committed_calls = 0u64;
     for _ in 0..64 {
-        let r = rs.call(&seq, &[]).expect("rseq available");
+        let r = unsafe { rs.call(&seq, &[]) }.expect("rseq available");
         if r != EXITED {
             committed_calls += 1;
         }

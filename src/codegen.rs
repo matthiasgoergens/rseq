@@ -676,12 +676,22 @@ impl RegionSet {
     /// Run `seq` on the current thread. Returns the sequence's result
     /// ([`EXITED`] for an early exit), or None if rseq is unavailable.
     ///
+    /// # Safety
+    ///
+    /// Generated code performs no runtime bounds checks: every memory index
+    /// the program computes must stay inside its region's allocation.
+    /// Per-CPU indices derived from `CpuId` are bounded by the kernel
+    /// (< `MAX_CPUS`); immediate indices, parameters used as indices, and
+    /// loaded values used as indices (e.g. freelist next pointers) are the
+    /// program author's responsibility. A program with an out-of-range
+    /// index is undefined behaviour, which is why this is not a safe fn.
+    ///
     /// # Panics
     ///
     /// Panics if `seq` was compiled for a different region count or needs
     /// more parameters than given.
     #[must_use]
-    pub fn call(&self, seq: &CompiledSeq, params: &[u64]) -> Option<u64> {
+    pub unsafe fn call(&self, seq: &CompiledSeq, params: &[u64]) -> Option<u64> {
         assert_eq!(seq.nregions, self.layout.regions.len(), "layout mismatch");
         assert!(params.len() >= seq.nparams, "missing parameters");
         let area = current_area()?;
