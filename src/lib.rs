@@ -3,7 +3,8 @@
 //! critical section, an interpreter with deterministic abort injection, and
 //! an exhaustive bounded model checker.
 //!
-//! The design: one IR, three backends. This crate currently implements the simulator and checker
+//! The design: one IR, three backends. This crate currently implements the
+//! simulator and checker
 //! backends; the asm-template + `rseq_cs` descriptor emitter and the
 //! ptrace-based conformance harness against the live kernel come next.
 
