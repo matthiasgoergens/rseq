@@ -2,15 +2,36 @@
 
 A combinator algebra for Linux restartable sequences, built model-first.
 
+## Why
+
 Restartable sequences (`rseq(2)`) give a thread atomicity over per-CPU data
 for a short instruction window: if the thread is preempted or migrated inside
 the window, the kernel restarts it at the top instead of letting it commit.
-The catch is that a valid sequence has a very rigid shape — a side-effect-free
-prefix, at most one branch-to-exit, exactly one committing store — and getting
-that shape (or its `rseq_cs` descriptor) subtly wrong is nearly untestable by
-stress alone, because natural aborts are rare.
+Unlike transactional memory, the abort condition is not "someone touched my
+read set" but "my thread lost its claim to this CPU" — the closer analogy is
+load-linked/store-conditional stretched to a handful of instructions with a
+single committing store. That is what makes per-CPU counters, freelists, and
+tcmalloc-style caches run at plain-store speed with no lock prefix at all.
 
-The design here is one IR with three backends:
+The catch is twofold. A valid sequence has a rigid shape — a replay-safe
+prefix of loads and register arithmetic, writes only to unpublished scratch
+memory, exactly one committing store, terminal — and every prefix must be
+idempotent, because the kernel may restart the sequence at any instruction
+boundary with a possibly different CPU id. And the classic bugs (a hoisted
+CPU id that goes stale across a migration, an off-by-one
+`post_commit_offset` that re-executes a completed commit) are nearly
+untestable by stress alone, because natural aborts are rare and land on
+arbitrary instructions.
+
+The answer here is to make the sequence shape a *data structure* rather than
+a discipline: programs are built from a small algebra whose consuming
+finisher makes "one terminal commit" true by construction, and the same IR
+feeds every backend, so the artifact that is model-checked is the artifact
+that runs. Aborts stop being rare events you hope to hit: the checker
+enumerates all of them, and a ptrace harness replays each one against the
+live kernel.
+
+## The backends
 
 1. **Simulator + model checker** (this milestone, done): the IR is
    interpreted with deterministic abort injection. The checker enumerates
