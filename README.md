@@ -37,10 +37,20 @@ The design here is one IR with three backends:
    compiled programs pass the same live-kernel stress harness as the
    hand-written ones and agree with the simulator on single-threaded runs,
    so model-checked and executed programs are now the same artifact.
-4. **ptrace conformance harness** (next): single-step the real binary to
-   every abort point and inject signals/migrations against the live kernel,
-   closing the gap between the checked IR and the emitted bytes (descriptor
-   placement, window bounds, signature).
+4. **ptrace conformance harness** (done): a forked child loops on a compiled
+   sequence under ptrace; for every instruction boundary inside the window
+   the parent runs it into an int3, rewinds, forces a migration with
+   `sched_setaffinity` (a guaranteed rseq event), and observes with
+   breakpoints on both possible continuations what the kernel did on resume.
+   Every in-window boundary must redirect to the abort handler with no
+   commit visible; one boundary past the committing store must NOT redirect
+   and the commit must count exactly once. Registration is verified from
+   outside via `PTRACE_GET_RSEQ_CONFIGURATION`. The harness caught a real
+   bug on its first run: the JIT held the descriptor address in rax, which
+   also serves as the region-base scratch, so a retry after an abort
+   re-armed `rseq_cs` with a region base and ran unprotected — a
+   double-abort-in-one-call bug (~1e-8 per call) that stress testing had no
+   realistic chance of finding.
 
 ## Layout
 
@@ -61,10 +71,14 @@ The design here is one IR with three backends:
 - [src/codegen.rs](src/codegen.rs) — the JIT: x86-64 encoder, linear-scan
   register allocation, descriptor emission, raw-syscall mmap, and
   `RegionSet` for driving compiled programs.
+- [src/sys.rs](src/sys.rs) — minimal raw-syscall layer (mmap, fork, wait,
+  ptrace, affinity), keeping the crate dependency-free.
 - [tests/model.rs](tests/model.rs) — the checker run against the example
   programs; [tests/kernel.rs](tests/kernel.rs) and
   [tests/codegen.rs](tests/codegen.rs) — live-kernel stress and
-  sim-equivalence tests for hand-written and compiled sequences.
+  sim-equivalence tests for hand-written and compiled sequences;
+  [tests/ptrace.rs](tests/ptrace.rs) — the deterministic abort-point
+  conformance harness.
 
 ## Running
 

@@ -6,8 +6,8 @@
 //!
 //! ```text
 //! offset  0: struct rseq_cs descriptor (32-byte aligned at page start)
-//! offset 32: entry:  lea rax, [rip + descriptor]
-//!            retry:  mov [rdi + 8], rax          ; arm rseq_cs
+//! offset 32: retry:  lea rax, [rip + descriptor]
+//!                    mov [rdi + 8], rax          ; arm rseq_cs
 //!            start:  ...body...
 //!                    mov [mem], src              ; the committing store
 //!            post:   ...move ret value to rax...
@@ -34,6 +34,7 @@ use std::fmt;
 
 use crate::ir::{BinOp, Cond, Layout, Op, Operand, Program, Reg, RegionId, ValidateError};
 use crate::rt::{MAX_CPUS, RseqArea, current_area};
+use crate::sys;
 
 /// Return value of a compiled sequence that exited early instead of
 /// committing. Programs whose committed `ret` could legitimately be
@@ -84,6 +85,11 @@ pub struct CompiledSeq {
     entry: unsafe extern "C" fn(*mut RseqArea, *const u64, *const u64) -> u64,
     nregions: usize,
     nparams: usize,
+    start_off: usize,
+    post_off: usize,
+    abort_off: usize,
+    retry_off: usize,
+    window_insns: Vec<usize>,
     pub name: String,
 }
 
@@ -145,6 +151,11 @@ impl CompiledSeq {
                     })
                     .max()
                     .unwrap_or(0),
+                start_off: blob.start_off,
+                post_off: blob.post_off,
+                abort_off: blob.abort_off,
+                retry_off: blob.retry_off,
+                window_insns: blob.window_insns,
                 name: prog.name.clone(),
             })
         }
@@ -172,6 +183,38 @@ impl CompiledSeq {
     pub fn code_bytes(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self.base, self.map_len) }
     }
+
+    /// Absolute address of the first window instruction (`start_ip`).
+    #[must_use]
+    pub fn start_addr(&self) -> usize {
+        self.base as usize + self.start_off
+    }
+
+    /// Absolute address one past the committing store (`post_commit`).
+    #[must_use]
+    pub fn post_addr(&self) -> usize {
+        self.base as usize + self.post_off
+    }
+
+    /// Absolute address of the abort handler (`abort_ip`).
+    #[must_use]
+    pub fn abort_addr(&self) -> usize {
+        self.base as usize + self.abort_off
+    }
+
+    /// Absolute address of the re-arming retry point the abort handler
+    /// jumps to.
+    #[must_use]
+    pub fn retry_addr(&self) -> usize {
+        self.base as usize + self.retry_off
+    }
+
+    /// Absolute addresses of every instruction boundary inside the window —
+    /// the complete set of abort points.
+    #[must_use]
+    pub fn window_insn_addrs(&self) -> Vec<usize> {
+        self.window_insns.iter().map(|o| self.base as usize + o).collect()
+    }
 }
 
 const ENTRY_OFF: usize = 32;
@@ -181,6 +224,9 @@ struct Blob {
     start_off: usize,
     post_off: usize,
     abort_off: usize,
+    retry_off: usize,
+    /// Instruction start offsets inside the window [`start_off`, `post_off`).
+    window_insns: Vec<usize>,
 }
 
 fn emit(prog: &Program) -> Result<Blob, CompileError> {
@@ -213,15 +259,24 @@ fn emit(prog: &Program) -> Result<Blob, CompileError> {
         mark(o, usize::MAX, &mut last_use);
     }
 
-    let mut a = Asm { buf: vec![0u8; ENTRY_OFF], exit_patches: Vec::new() };
+    let mut a = Asm { buf: vec![0u8; ENTRY_OFF], exit_patches: Vec::new(), insns: Vec::new() };
     let mut ra = RegAlloc { map: vec![None; last_use.len().max(prog.max_reg_bound())], free: POOL.to_vec() };
 
-    // entry: lea rax, [rip + descriptor]   (descriptor is at offset 0)
+    // retry: lea rax, [rip + descriptor]   (descriptor is at offset 0)
+    //        mov [rdi + 8], rax            (arm rseq_cs)
+    //
+    // The lea must be INSIDE the retry loop: rax doubles as the region-base
+    // scratch, so an attempt that aborted after a load_base would otherwise
+    // re-arm rseq_cs with a region base — the kernel then reads zeros there,
+    // declines to redirect, and the retry runs unprotected. Found
+    // deterministically by the ptrace harness (abort point 4); invisible to
+    // stress testing, which needs two aborts in one call to trigger it.
+    let retry_off = a.buf.len();
+    a.begin();
     a.buf.extend_from_slice(&[0x48, 0x8D, 0x05]);
     let disp = -((a.buf.len() + 4) as i64);
     a.imm32(disp as i32);
-    // retry: mov [rdi + 8], rax
-    let retry_off = a.buf.len();
+    a.begin();
     a.buf.extend_from_slice(&[0x48, 0x89, 0x47, 0x08]);
     let start_off = a.buf.len();
 
@@ -258,7 +313,9 @@ fn emit(prog: &Program) -> Result<Blob, CompileError> {
     let disp = (retry_off as i64 - (a.buf.len() as i64 + 4)) as i32;
     a.imm32(disp);
 
-    Ok(Blob { buf: a.buf, start_off, post_off, abort_off })
+    let window_insns =
+        a.insns.iter().copied().filter(|&o| o >= start_off && o < post_off).collect();
+    Ok(Blob { buf: a.buf, start_off, post_off, abort_off, retry_off, window_insns })
 }
 
 // One match arm per op; splitting it would scatter the encoding logic.
@@ -268,6 +325,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
         Op::CpuId { dst } => {
             let d = ra.alloc(dst, &[])?;
             // mov d32, [rdi + 4] — 32-bit load zero-extends.
+            a.begin();
             a.rex_opt(false, d, 0, RDI);
             a.buf.push(0x8B);
             a.modrm(0b01, d, RDI);
@@ -281,6 +339,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
         Op::Param { dst, index } => {
             let d = ra.alloc(dst, &[])?;
             // mov d, [rdx + index*8]
+            a.begin();
             a.rex(true, d, 0, RDX);
             a.buf.push(0x8B);
             a.modrm(0b10, d, RDX);
@@ -294,6 +353,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                 Operand::Reg(r) => {
                     let i = ra.phys(r)?;
                     // mov d, [rax + i*8]
+                    a.begin();
                     a.rex(true, d, i, RAX);
                     a.buf.push(0x8B);
                     a.modrm(0b00, d, 0b100);
@@ -301,6 +361,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                 }
                 Operand::Imm(k) => {
                     // mov d, [rax + k*8]
+                    a.begin();
                     a.rex(true, d, 0, RAX);
                     a.buf.push(0x8B);
                     a.modrm(0b10, d, RAX);
@@ -328,6 +389,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                         return Err(CompileError::ShiftByRegister);
                     };
                     // shl/shr d, imm8
+                    a.begin();
                     a.rex(true, 0, 0, d);
                     a.buf.push(0xC1);
                     a.modrm(0b11, if matches!(op, BinOp::Shl) { 4 } else { 5 }, d);
@@ -350,6 +412,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                         BinOp::Xor => a.alu_rr(0x31, d, s),
                         BinOp::Mul => {
                             // imul d, s (r64, r/m64 form).
+                            a.begin();
                             a.rex(true, d, 0, s);
                             a.buf.extend_from_slice(&[0x0F, 0xAF]);
                             a.modrm(0b11, d, s);
@@ -385,6 +448,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                 Cond::Lt => 0x82, // jb, unsigned
                 Cond::Ge => 0x83, // jae, unsigned
             };
+            a.begin();
             a.buf.extend_from_slice(&[0x0F, cc]);
             a.exit_patches.push(a.buf.len());
             a.imm32(0);
@@ -402,6 +466,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                 Operand::Reg(r) => {
                     let i = ra.phys(r)?;
                     // mov [rax + i*8], s
+                    a.begin();
                     a.rex(true, s, i, RAX);
                     a.buf.push(0x89);
                     a.modrm(0b00, s, 0b100);
@@ -409,6 +474,7 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
                 }
                 Operand::Imm(k) => {
                     // mov [rax + k*8], s
+                    a.begin();
                     a.rex(true, s, 0, RAX);
                     a.buf.push(0x89);
                     a.modrm(0b10, s, RAX);
@@ -423,9 +489,17 @@ fn emit_op(a: &mut Asm, ra: &mut RegAlloc, op: Op) -> Result<(), CompileError> {
 struct Asm {
     buf: Vec<u8>,
     exit_patches: Vec<usize>,
+    /// Start offset of every emitted instruction — the ptrace harness places
+    /// breakpoints on each boundary inside the window.
+    insns: Vec<usize>,
 }
 
 impl Asm {
+    /// Mark the start of one machine instruction.
+    fn begin(&mut self) {
+        self.insns.push(self.buf.len());
+    }
+
     fn rex(&mut self, w: bool, r: u8, x: u8, b: u8) {
         self.buf.push(
             0x40 | (u8::from(w) << 3) | ((r >> 3) << 2) | ((x >> 3) << 1) | (b >> 3),
@@ -453,6 +527,7 @@ impl Asm {
 
     /// movabs r, imm64
     fn mov_ri(&mut self, r: u8, v: u64) {
+        self.begin();
         self.rex(true, 0, 0, r);
         self.buf.push(0xB8 | (r & 7));
         self.buf.extend_from_slice(&v.to_le_bytes());
@@ -465,6 +540,7 @@ impl Asm {
 
     /// `opcode` in "r/m64, r64" form: dst = dst OP src.
     fn alu_rr(&mut self, opcode: u8, dst: u8, src: u8) {
+        self.begin();
         self.rex(true, src, 0, dst);
         self.buf.push(opcode);
         self.modrm(0b11, src, dst);
@@ -472,6 +548,7 @@ impl Asm {
 
     /// mov rax, [rsi + region*8] — region base into the rax scratch.
     fn load_base(&mut self, region: RegionId) {
+        self.begin();
         self.rex(true, RAX, 0, RSI);
         self.buf.push(0x8B);
         self.modrm(0b10, RAX, RSI);
@@ -585,6 +662,19 @@ impl RegionSet {
         Some(out)
     }
 
+    /// Base address of a region — also valid in a forked child, which
+    /// inherits the mapping at the same address.
+    #[must_use]
+    pub fn region_base(&self, r: RegionId) -> u64 {
+        self.bases[r.0]
+    }
+
+    /// Number of words in a region.
+    #[must_use]
+    pub fn region_len(&self, r: RegionId) -> usize {
+        self.allocs[r.0].len()
+    }
+
     /// Quiescent access to a region (`&mut self`: no calls in flight).
     pub fn region_mut(&mut self, r: RegionId) -> &mut [u64] {
         let a = &mut self.allocs[r.0];
@@ -592,55 +682,3 @@ impl RegionSet {
     }
 }
 
-/// Raw syscalls for the executable mapping — keeps the crate dependency-free.
-mod sys {
-    use core::arch::asm;
-
-    const SYS_MMAP: usize = 9;
-    const SYS_MPROTECT: usize = 10;
-    const SYS_MUNMAP: usize = 11;
-
-    const PROT_READ: usize = 1;
-    const PROT_WRITE: usize = 2;
-    const PROT_EXEC: usize = 4;
-    const MAP_PRIVATE_ANON: usize = 0x22;
-
-    unsafe fn syscall6(nr: usize, args: [usize; 6]) -> isize {
-        let ret: isize;
-        unsafe {
-            asm!(
-                "syscall",
-                inlateout("rax") nr => ret,
-                in("rdi") args[0],
-                in("rsi") args[1],
-                in("rdx") args[2],
-                in("r10") args[3],
-                in("r8") args[4],
-                in("r9") args[5],
-                lateout("rcx") _,
-                lateout("r11") _,
-                options(nostack)
-            );
-        }
-        ret
-    }
-
-    pub unsafe fn mmap_rw(len: usize) -> Result<*mut u8, isize> {
-        let ret = unsafe {
-            syscall6(
-                SYS_MMAP,
-                [0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE_ANON, usize::MAX, 0],
-            )
-        };
-        if ret < 0 { Err(ret) } else { Ok(ret as *mut u8) }
-    }
-
-    pub unsafe fn mprotect_rx(p: *mut u8, len: usize) -> Result<(), isize> {
-        let ret = unsafe { syscall6(SYS_MPROTECT, [p as usize, len, PROT_READ | PROT_EXEC, 0, 0, 0]) };
-        if ret < 0 { Err(ret) } else { Ok(()) }
-    }
-
-    pub unsafe fn munmap(p: *mut u8, len: usize) {
-        let _ = unsafe { syscall6(SYS_MUNMAP, [p as usize, len, 0, 0, 0, 0]) };
-    }
-}

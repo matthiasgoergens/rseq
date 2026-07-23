@@ -8,7 +8,9 @@ edition = "2024"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 # The model traffics in u64 machine words used as indices on a 64-bit target,
-# and the kernel ABI reports sentinels in unsigned fields; try_from at every
-# index would obscure rather than protect.
+# the kernel ABI reports sentinels in unsigned fields, and raw syscalls take
+# pids/signals as untyped words; try_from at every cast would obscure rather
+# than protect.
 cast_possible_truncation = "allow"
 cast_possible_wrap = "allow"
+cast_sign_loss = "allow"

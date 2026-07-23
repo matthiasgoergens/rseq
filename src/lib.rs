@@ -15,3 +15,5 @@ pub mod progs;
 #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
 pub mod rt;
 pub mod sim;
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+pub mod sys;
