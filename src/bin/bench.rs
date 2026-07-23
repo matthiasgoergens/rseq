@@ -364,6 +364,9 @@ mod real {
     // ---------- analysis ----------
 
     struct Row {
+        /// Index of the source file — block ids from different files both
+        /// start at zero, so blocks are only identified by (file, block).
+        file: usize,
         block: u64,
         domain: String,
         threads: usize,
@@ -375,7 +378,7 @@ mod real {
 
     fn read_rows(paths: &[String]) -> Vec<Row> {
         let mut rows = Vec::new();
-        for p in paths {
+        for (file, p) in paths.iter().enumerate() {
             let content = fs::read_to_string(p).unwrap_or_else(|e| panic!("read {p}: {e}"));
             for line in content.lines() {
                 if line.starts_with('#') || line.starts_with("block") || line.is_empty() {
@@ -386,6 +389,7 @@ mod real {
                     continue;
                 }
                 rows.push(Row {
+                    file,
                     block: f[0].parse().unwrap_or(0),
                     domain: f[1].into(),
                     threads: f[2].parse().unwrap_or(0),
@@ -430,16 +434,15 @@ mod real {
             eprintln!("no data");
             return;
         }
-        // Group rows per block (a block shares θ across arms by construction).
-        let mut blocks: BTreeMap<(String, u64), BTreeMap<String, f64>> = BTreeMap::new();
-        let mut buckets: BTreeMap<(String, u64), (String, &'static str)> = BTreeMap::new();
+        // Group rows per block. A block is identified by (file, block id) —
+        // ids restart at zero in each file — and shares θ across arms by
+        // construction.
+        let mut blocks: BTreeMap<(usize, u64), BTreeMap<String, f64>> = BTreeMap::new();
+        let mut buckets: BTreeMap<(usize, u64), (String, &'static str)> = BTreeMap::new();
         let mut abort_rates: BTreeMap<(String, &'static str), Vec<f64>> = BTreeMap::new();
         for r in &rows {
-            let key = (format!("{}|{}", r.domain, r.threads), r.block);
-            blocks
-                .entry(key.clone())
-                .or_default()
-                .insert(r.arm.clone(), r.mops);
+            let key = (r.file, r.block);
+            blocks.entry(key).or_default().insert(r.arm.clone(), r.mops);
             buckets
                 .entry(key)
                 .or_insert((r.domain.clone(), bucket(r.threads)));
@@ -451,9 +454,16 @@ mod real {
             }
         }
         // Paired within-block: throughput medians and ratio-vs-mutex per
-        // (domain, thread-bucket).
+        // (domain, thread-bucket). Incomplete blocks (an interrupted run
+        // that did not finish every arm) are dropped: pairing requires the
+        // whole block.
+        let mut dropped = 0usize;
         let mut cells: BTreeMap<(String, &'static str, String), Cell> = BTreeMap::new();
         for (key, arms) in &blocks {
+            if arms.len() != ARMS.len() {
+                dropped += 1;
+                continue;
+            }
             let Some((domain, bkt)) = buckets.get(key).cloned() else {
                 continue;
             };
@@ -467,6 +477,9 @@ mod real {
                     cell.1.push(mops / m);
                 }
             }
+        }
+        if dropped > 0 {
+            eprintln!("dropped {dropped} incomplete block(s)");
         }
         println!(
             "{:<7} {:<6} {:<16} {:>7} {:>12} {:>12} {:>8}",

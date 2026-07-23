@@ -58,7 +58,7 @@ fn freelist_stress_conserves_nodes() {
     let mut fl = PerCpuFreelist::new(NNODES as usize);
     // Seed: all nodes pushed from the main thread (whatever CPUs it lands on).
     for node in 0..NNODES {
-        assert!(fl.push(node));
+        assert!(unsafe { fl.push(node) });
     }
     thread::scope(|s| {
         for _ in 0..nthreads {
@@ -69,7 +69,7 @@ fn freelist_stress_conserves_nodes() {
                 // that catches a broken commit.
                 for i in 0..ITERS {
                     if let Some(node) = fl.pop() {
-                        assert!(fl.push(node));
+                        assert!(unsafe { fl.push(node) });
                     }
                     if i % 1024 == 0 {
                         thread::yield_now();

@@ -83,7 +83,10 @@ pub struct CompiledSeq {
     base: *mut u8,
     map_len: usize,
     entry: unsafe extern "C" fn(*mut RseqArea, *const u64, *const u64) -> u64,
-    nregions: usize,
+    /// (`per_cpu`, words) of every region of the layout this was compiled
+    /// against — a compiled sequence is only meaningful on a `RegionSet`
+    /// with exactly these shapes.
+    region_shapes: Vec<(bool, usize)>,
     nparams: usize,
     start_off: usize,
     post_off: usize,
@@ -141,7 +144,11 @@ impl CompiledSeq {
                     *mut u8,
                     unsafe extern "C" fn(*mut RseqArea, *const u64, *const u64) -> u64,
                 >(base.add(ENTRY_OFF)),
-                nregions: layout.regions.len(),
+                region_shapes: layout
+                    .regions
+                    .iter()
+                    .map(|d| (d.per_cpu, d.words))
+                    .collect(),
                 nparams: prog
                     .ops
                     .iter()
@@ -647,7 +654,11 @@ pub struct RegionSet {
     bases: Box<[u64]>,
 }
 
-// Safety: cross-thread mutation happens only inside the rseq sequences.
+// Safety: cross-thread mutation happens only inside the rseq sequences,
+// which are executed exclusively through the unsafe `call`/`call_cached`,
+// whose contract requires per-CPU commit discipline (or external
+// serialisation for shared published regions). Quiescent readers take
+// `&mut self`.
 unsafe impl Sync for RegionSet {}
 
 impl RegionSet {
@@ -686,13 +697,28 @@ impl RegionSet {
     /// program author's responsibility. A program with an out-of-range
     /// index is undefined behaviour, which is why this is not a safe fn.
     ///
+    /// Concurrency: rseq serialises commits *per CPU*, nothing more.
+    /// Concurrent calls are sound only for programs that follow the per-CPU
+    /// ownership discipline (commit to the current CPU's slice of per-CPU
+    /// regions). Programs that commit to a shared (non-per-CPU) published
+    /// region race with each other; such programs must be externally
+    /// serialised.
+    ///
     /// # Panics
     ///
     /// Panics if `seq` was compiled for a different region count or needs
     /// more parameters than given.
     #[must_use]
     pub unsafe fn call(&self, seq: &CompiledSeq, params: &[u64]) -> Option<u64> {
-        assert_eq!(seq.nregions, self.layout.regions.len(), "layout mismatch");
+        assert!(
+            seq.region_shapes.len() == self.layout.regions.len()
+                && seq
+                    .region_shapes
+                    .iter()
+                    .zip(&self.layout.regions)
+                    .all(|(&(pc, w), d)| pc == d.per_cpu && w == d.words),
+            "sequence compiled against a different layout"
+        );
         assert!(params.len() >= seq.nparams, "missing parameters");
         let area = current_area()?;
         let out = unsafe { seq.call_raw(area, self.bases.as_ptr(), params.as_ptr()) };

@@ -243,15 +243,20 @@ impl PerCpuFreelist {
         }
     }
 
-    /// Push `node` onto the current CPU's list. The caller must own `node`
-    /// (popped earlier or never yet pushed) — that ownership is what makes
-    /// the scratch write to `nodes[node]` unobservable.
+    /// Push `node` onto the current CPU's list.
+    ///
+    /// # Safety
+    ///
+    /// The caller must own `node` exclusively (popped earlier, or never yet
+    /// pushed, and not concurrently pushed by anyone else) — that ownership
+    /// is what makes the scratch write to `nodes[node]` unobservable. Two
+    /// threads pushing the same node race on its next pointer.
     ///
     /// # Panics
     ///
     /// Panics if `node` is out of range for the pool.
     #[must_use]
-    pub fn push(&self, node: u64) -> bool {
+    pub unsafe fn push(&self, node: u64) -> bool {
         assert!((node as usize) < self.nodes.len());
         let Some(area) = current_area() else {
             return false;
