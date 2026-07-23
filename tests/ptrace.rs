@@ -31,7 +31,9 @@ const RSEQ_SIG: u32 = 0x5305_3053;
 
 /// Read the child's per-CPU counter total via ptrace.
 unsafe fn counter_sum(pid: i32, base: u64, words: usize) -> u64 {
-    (0..words).map(|i| unsafe { ptrace::peek(pid, base as usize + i * 8) }).sum()
+    (0..words)
+        .map(|i| unsafe { ptrace::peek(pid, base as usize + i * 8) })
+        .sum()
 }
 
 /// Plant int3 at `addr`, run the child into it, rewind to `addr`.
@@ -73,7 +75,11 @@ unsafe fn race_to(pid: i32, arms: &[usize]) -> usize {
         );
         let mut regs = ptrace::getregs(pid);
         let hit = regs[ptrace::RIP] as usize - 1;
-        assert!(arms.contains(&hit), "trapped at unexpected rip {:#x}", regs[ptrace::RIP]);
+        assert!(
+            arms.contains(&hit),
+            "trapped at unexpected rip {:#x}",
+            regs[ptrace::RIP]
+        );
         for (&a, &orig) in arms.iter().zip(&origs) {
             ptrace::poke(pid, a, orig);
         }
@@ -148,7 +154,10 @@ fn every_abort_point_redirects_and_post_commit_does_not() {
         let cfg = ptrace::rseq_configuration(pid);
         assert_eq!(cfg.signature, RSEQ_SIG, "kernel-registered signature");
         let area = rt::current_area().unwrap() as usize;
-        assert_eq!(cfg.rseq_abi_pointer as usize, area, "area inherited across fork");
+        assert_eq!(
+            cfg.rseq_abi_pointer as usize, area,
+            "area inherited across fork"
+        );
 
         // Positive case: a migration injected at EVERY window boundary
         // must redirect the child to the abort handler before any further
@@ -205,7 +214,10 @@ fn every_abort_point_redirects_and_post_commit_does_not() {
         // exactly once, not zero times and not twice.
         let sum = counter_sum(pid, counters_base, counters_len);
         let calls_now = ptrace::peek(pid, calls_addr);
-        assert!(calls_now > calls_done, "child should have finished the call");
+        assert!(
+            calls_now > calls_done,
+            "child should have finished the call"
+        );
         assert_eq!(sum, calls_now, "the commit counted exactly once");
         let ret = sys::sched_setaffinity(pid, allowed);
         assert!(ret >= 0, "restore affinity: {ret}");

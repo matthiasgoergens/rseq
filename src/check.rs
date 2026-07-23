@@ -32,7 +32,11 @@ pub struct CheckConfig {
 
 impl Default for CheckConfig {
     fn default() -> Self {
-        Self { ncpus: 3, max_aborts: 2, sim: SimConfig::default() }
+        Self {
+            ncpus: 3,
+            max_aborts: 2,
+            sim: SimConfig::default(),
+        }
     }
 }
 
@@ -47,9 +51,21 @@ pub struct CheckFailure {
 pub enum FailureKind {
     Invalid(ValidateError),
     Sim(SimError),
-    OutcomeMismatch { got: Outcome, want: Outcome },
-    ObservableMismatch { got: String, want: String },
-    PrefixImpure { prefix_len: usize, region: String, index: usize, before: u64, after: u64 },
+    OutcomeMismatch {
+        got: Outcome,
+        want: Outcome,
+    },
+    ObservableMismatch {
+        got: String,
+        want: String,
+    },
+    PrefixImpure {
+        prefix_len: usize,
+        region: String,
+        index: usize,
+        before: u64,
+        after: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -80,7 +96,11 @@ where
     O: Fn(&Memory) -> V,
 {
     if let Err(e) = prog.validate(layout) {
-        return Err(CheckFailure { start_cpu: 0, plan: vec![], kind: FailureKind::Invalid(e) });
+        return Err(CheckFailure {
+            start_cpu: 0,
+            plan: vec![],
+            kind: FailureKind::Invalid(e),
+        });
     }
     let mut stats = Stats::default();
 
@@ -121,9 +141,16 @@ where
     // Phase 2: restart equivalence over all abort schedules.
     let max_at = prog.ops.len() + usize::from(cfg.sim.post_commit_in_window);
     let mut plan: Vec<AbortPoint> = Vec::new();
-    let env = Env { prog, layout, params, cfg: &cfg };
+    let env = Env {
+        prog,
+        layout,
+        params,
+        cfg: &cfg,
+    };
     for start_cpu in 0..cfg.ncpus {
-        check_schedules(&env, &setup, &observe, start_cpu, &mut plan, &mut stats, max_at)?;
+        check_schedules(
+            &env, &setup, &observe, start_cpu, &mut plan, &mut stats, max_at,
+        )?;
     }
     Ok(stats)
 }
@@ -178,7 +205,11 @@ where
     O: Fn(&Memory) -> V,
 {
     stats.schedules += 1;
-    let fail = |kind| CheckFailure { start_cpu, plan: plan.to_vec(), kind };
+    let fail = |kind| CheckFailure {
+        start_cpu,
+        plan: plan.to_vec(),
+        kind,
+    };
 
     let mut mem = Memory::new(env.layout, env.cfg.ncpus);
     setup(&mut mem);
@@ -191,13 +222,22 @@ where
     // is the simulator-reported final CPU, not the plan's last entry.)
     let mut want_mem = Memory::new(env.layout, env.cfg.ncpus);
     setup(&mut want_mem);
-    let want =
-        sim::run(env.prog, &mut want_mem, env.params, got.final_cpu, &[], SimConfig::default())
-            .map_err(|e| fail(FailureKind::Sim(e)))?;
+    let want = sim::run(
+        env.prog,
+        &mut want_mem,
+        env.params,
+        got.final_cpu,
+        &[],
+        SimConfig::default(),
+    )
+    .map_err(|e| fail(FailureKind::Sim(e)))?;
     let want_obs = observe(&want_mem);
 
     if got.outcome != want.outcome {
-        return Err(fail(FailureKind::OutcomeMismatch { got: got.outcome, want: want.outcome }));
+        return Err(fail(FailureKind::OutcomeMismatch {
+            got: got.outcome,
+            want: want.outcome,
+        }));
     }
     let obs = observe(&mem);
     if obs != want_obs {

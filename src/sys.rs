@@ -16,7 +16,7 @@ pub const SIGSTOP: i32 = 19;
 ///
 /// Raw syscall: the caller is responsible for the ABI contract of `nr`.
 #[inline]
-#[must_use] 
+#[must_use]
 pub unsafe fn syscall6(nr: usize, args: [usize; 6]) -> isize {
     let ret: isize;
     unsafe {
@@ -59,17 +59,35 @@ const MAP_PRIVATE_ANON: usize = 0x22;
 /// Returns fresh anonymous RW memory or a negative errno.
 pub unsafe fn mmap_rw(len: usize) -> Result<*mut u8, isize> {
     let ret = unsafe {
-        syscall6(SYS_MMAP, [0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE_ANON, usize::MAX, 0])
+        syscall6(
+            SYS_MMAP,
+            [
+                0,
+                len,
+                PROT_READ | PROT_WRITE,
+                MAP_PRIVATE_ANON,
+                usize::MAX,
+                0,
+            ],
+        )
     };
-    if ret < 0 { Err(ret) } else { Ok(ret as *mut u8) }
+    if ret < 0 {
+        Err(ret)
+    } else {
+        Ok(ret as *mut u8)
+    }
 }
 
 /// # Safety
 ///
 /// `p..p+len` must be a mapping owned by the caller.
 pub unsafe fn mprotect_rx(p: *mut u8, len: usize) -> Result<(), isize> {
-    let ret =
-        unsafe { syscall6(SYS_MPROTECT, [p as usize, len, PROT_READ | PROT_EXEC, 0, 0, 0]) };
+    let ret = unsafe {
+        syscall6(
+            SYS_MPROTECT,
+            [p as usize, len, PROT_READ | PROT_EXEC, 0, 0, 0],
+        )
+    };
     if ret < 0 { Err(ret) } else { Ok(()) }
 }
 
@@ -85,7 +103,7 @@ pub unsafe fn munmap(p: *mut u8, len: usize) {
 ///
 /// Real fork(2): the child returns 0 with a single thread; the caller must
 /// keep the child away from any state other threads may have had locked.
-#[must_use] 
+#[must_use]
 pub unsafe fn fork() -> isize {
     unsafe { syscall6(SYS_FORK, [0; 6]) }
 }
@@ -98,7 +116,7 @@ pub fn getpid() -> i32 {
 /// # Safety
 ///
 /// Sends `sig` to `pid`.
-#[must_use] 
+#[must_use]
 pub unsafe fn kill(pid: i32, sig: i32) -> isize {
     unsafe { syscall6(SYS_KILL, [pid as usize, sig as usize, 0, 0, 0, 0]) }
 }
@@ -118,11 +136,14 @@ pub unsafe fn exit_group(code: i32) -> ! {
 /// # Safety
 ///
 /// `pid` must be a child of the calling thread's process.
-#[must_use] 
+#[must_use]
 pub unsafe fn wait4(pid: i32) -> i32 {
     let mut status: i32 = 0;
     let ret = unsafe {
-        syscall6(SYS_WAIT4, [pid as usize, (&raw mut status) as usize, 0, 0, 0, 0])
+        syscall6(
+            SYS_WAIT4,
+            [pid as usize, (&raw mut status) as usize, 0, 0, 0, 0],
+        )
     };
     assert!(ret > 0, "wait4 failed: {ret}");
     status
@@ -135,11 +156,14 @@ pub unsafe fn wait4(pid: i32) -> i32 {
 /// # Safety
 ///
 /// Changes scheduling of another process.
-#[must_use] 
+#[must_use]
 pub unsafe fn sched_setaffinity(pid: i32, mask: u64) -> isize {
     let mask = [mask];
     unsafe {
-        syscall6(SYS_SCHED_SETAFFINITY, [pid as usize, 8, mask.as_ptr() as usize, 0, 0, 0])
+        syscall6(
+            SYS_SCHED_SETAFFINITY,
+            [pid as usize, 8, mask.as_ptr() as usize, 0, 0, 0],
+        )
     }
 }
 
@@ -148,7 +172,10 @@ pub unsafe fn sched_setaffinity(pid: i32, mask: u64) -> isize {
 pub fn sched_getaffinity_self() -> u64 {
     let mut mask = [0u64];
     let ret = unsafe {
-        syscall6(SYS_SCHED_GETAFFINITY, [0, 8, mask.as_mut_ptr() as usize, 0, 0, 0])
+        syscall6(
+            SYS_SCHED_GETAFFINITY,
+            [0, 8, mask.as_mut_ptr() as usize, 0, 0, 0],
+        )
     };
     assert!(ret > 0, "sched_getaffinity failed: {ret}");
     mask[0]
@@ -157,7 +184,11 @@ pub fn sched_getaffinity_self() -> u64 {
 /// The signal that stopped the tracee, or None if it did not stop.
 #[must_use]
 pub fn stop_signal(status: i32) -> Option<i32> {
-    if status & 0xff == 0x7f { Some((status >> 8) & 0xff) } else { None }
+    if status & 0xff == 0x7f {
+        Some((status >> 8) & 0xff)
+    } else {
+        None
+    }
 }
 
 /// ptrace(2) operations, raw-syscall flavoured: PEEK requests write through
@@ -205,7 +236,7 @@ pub mod ptrace {
     /// # Safety
     ///
     /// `pid` must be a stopped tracee; `addr` readable in it.
-    #[must_use] 
+    #[must_use]
     pub unsafe fn peek(pid: i32, addr: usize) -> u64 {
         let mut out: u64 = 0;
         let ret = unsafe { req(PEEKTEXT, pid, addr, (&raw mut out) as usize) };
@@ -240,7 +271,7 @@ pub mod ptrace {
     /// # Safety
     ///
     /// `pid` must be a stopped tracee.
-    #[must_use] 
+    #[must_use]
     pub unsafe fn getregs(pid: i32) -> [u64; NREGS] {
         let mut regs = [0u64; NREGS];
         let ret = unsafe { req(GETREGS, pid, 0, regs.as_mut_ptr() as usize) };
@@ -259,7 +290,7 @@ pub mod ptrace {
     /// # Safety
     ///
     /// `pid` must be a stopped tracee. Kernel 5.13+.
-    #[must_use] 
+    #[must_use]
     pub unsafe fn rseq_configuration(pid: i32) -> RseqConfiguration {
         let mut cfg = RseqConfiguration::default();
         let ret = unsafe {

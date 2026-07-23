@@ -12,7 +12,9 @@ use std::thread;
 use rseq::rt::{self, PerCpuCounter, PerCpuFreelist};
 
 fn threads() -> usize {
-    2 * thread::available_parallelism().map(std::num::NonZero::get).unwrap_or(4)
+    2 * thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(4)
 }
 
 #[test]
@@ -86,6 +88,8 @@ fn freelist_stress_conserves_nodes() {
         seen,
         (0..NNODES).collect::<BTreeSet<_>>(),
         "nodes lost: {:?}",
-        (0..NNODES).filter(|n| !seen.contains(n)).collect::<Vec<_>>()
+        (0..NNODES)
+            .filter(|n| !seen.contains(n))
+            .collect::<Vec<_>>()
     );
 }

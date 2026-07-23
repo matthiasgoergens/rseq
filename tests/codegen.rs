@@ -14,7 +14,9 @@ use rseq::rt;
 use rseq::sim::{self, Memory, Outcome, SimConfig};
 
 fn threads() -> usize {
-    2 * thread::available_parallelism().map(std::num::NonZero::get).unwrap_or(4)
+    2 * thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(4)
 }
 
 fn rseq_available() -> bool {

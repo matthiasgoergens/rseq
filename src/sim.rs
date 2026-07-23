@@ -15,7 +15,7 @@ pub struct Memory {
 }
 
 impl Memory {
-    #[must_use] 
+    #[must_use]
     pub fn new(layout: &Layout, ncpus: usize) -> Self {
         let regions = layout
             .regions
@@ -25,20 +25,24 @@ impl Memory {
                 vec![d.init; len]
             })
             .collect();
-        Self { layout: layout.clone(), ncpus, regions }
+        Self {
+            layout: layout.clone(),
+            ncpus,
+            regions,
+        }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn ncpus(&self) -> usize {
         self.ncpus
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn region(&self, r: RegionId) -> &[u64] {
         &self.regions[r.0]
     }
@@ -53,7 +57,11 @@ impl Memory {
         self.regions[r.0]
             .get(index)
             .copied()
-            .ok_or(SimError::OutOfBounds { region: r, index, len: self.regions[r.0].len() })
+            .ok_or(SimError::OutOfBounds {
+                region: r,
+                index,
+                len: self.regions[r.0].len(),
+            })
     }
 
     fn write(&mut self, r: RegionId, index: usize, value: u64) -> Result<(), SimError> {
@@ -63,12 +71,16 @@ impl Memory {
                 *slot = value;
                 Ok(())
             }
-            None => Err(SimError::OutOfBounds { region: r, index, len }),
+            None => Err(SimError::OutOfBounds {
+                region: r,
+                index,
+                len,
+            }),
         }
     }
 
     /// Snapshot of all published regions, for prefix-purity checks.
-    #[must_use] 
+    #[must_use]
     pub fn published_snapshot(&self) -> Vec<(RegionId, Vec<u64>)> {
         self.layout
             .regions
@@ -82,15 +94,30 @@ impl Memory {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimError {
-    OutOfBounds { region: RegionId, index: usize, len: usize },
+    OutOfBounds {
+        region: RegionId,
+        index: usize,
+        len: usize,
+    },
     /// A commit targeted a per-CPU published slice owned by a CPU other than
     /// the one the sequence is currently running on. This is the stale-CPU-id
     /// bug class: the index was computed from a CPU id that migration made
     /// obsolete.
-    ForeignCommit { region: RegionId, index: usize, running_on: usize, owner: usize },
+    ForeignCommit {
+        region: RegionId,
+        index: usize,
+        running_on: usize,
+        owner: usize,
+    },
     UndefinedReg(Reg),
-    BadCpu { cpu: usize, ncpus: usize },
-    MissingParam { index: usize, nparams: usize },
+    BadCpu {
+        cpu: usize,
+        ncpus: usize,
+    },
+    MissingParam {
+        index: usize,
+        nparams: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,7 +171,10 @@ pub fn run(
     cfg: SimConfig,
 ) -> Result<RunResult, SimError> {
     if start_cpu >= mem.ncpus {
-        return Err(SimError::BadCpu { cpu: start_cpu, ncpus: mem.ncpus });
+        return Err(SimError::BadCpu {
+            cpu: start_cpu,
+            ncpus: mem.ncpus,
+        });
     }
     let mut cpu = start_cpu;
     let mut plan_iter = plan.iter();
@@ -153,18 +183,25 @@ pub fn run(
         let mut regs = RegFile::default();
         for (i, op) in prog.ops.iter().enumerate() {
             if let Some(p) = pending
-                && p.at == i {
-                    if p.new_cpu >= mem.ncpus {
-                        return Err(SimError::BadCpu { cpu: p.new_cpu, ncpus: mem.ncpus });
-                    }
-                    cpu = p.new_cpu;
-                    pending = plan_iter.next();
-                    continue 'attempt;
+                && p.at == i
+            {
+                if p.new_cpu >= mem.ncpus {
+                    return Err(SimError::BadCpu {
+                        cpu: p.new_cpu,
+                        ncpus: mem.ncpus,
+                    });
                 }
+                cpu = p.new_cpu;
+                pending = plan_iter.next();
+                continue 'attempt;
+            }
             match step(op, &mut regs, mem, params, cpu, start_cpu)? {
                 Step::Continue => {}
                 Step::Exit => {
-                    return Ok(RunResult { outcome: Outcome::Exited, final_cpu: cpu });
+                    return Ok(RunResult {
+                        outcome: Outcome::Exited,
+                        final_cpu: cpu,
+                    });
                 }
             }
         }
@@ -173,19 +210,26 @@ pub fn run(
         // land here and restart a completed sequence.
         if cfg.post_commit_in_window
             && let Some(p) = pending
-                && p.at == prog.ops.len() {
-                    if p.new_cpu >= mem.ncpus {
-                        return Err(SimError::BadCpu { cpu: p.new_cpu, ncpus: mem.ncpus });
-                    }
-                    cpu = p.new_cpu;
-                    pending = plan_iter.next();
-                    continue 'attempt;
-                }
+            && p.at == prog.ops.len()
+        {
+            if p.new_cpu >= mem.ncpus {
+                return Err(SimError::BadCpu {
+                    cpu: p.new_cpu,
+                    ncpus: mem.ncpus,
+                });
+            }
+            cpu = p.new_cpu;
+            pending = plan_iter.next();
+            continue 'attempt;
+        }
         let ret = match prog.ret {
             Some(o) => Some(regs.eval(o)?),
             None => None,
         };
-        return Ok(RunResult { outcome: Outcome::Committed { ret }, final_cpu: cpu });
+        return Ok(RunResult {
+            outcome: Outcome::Committed { ret },
+            final_cpu: cpu,
+        });
     }
 }
 
@@ -204,7 +248,10 @@ pub fn run_prefix(
     k: usize,
 ) -> Result<(), SimError> {
     if cpu >= mem.ncpus {
-        return Err(SimError::BadCpu { cpu, ncpus: mem.ncpus });
+        return Err(SimError::BadCpu {
+            cpu,
+            ncpus: mem.ncpus,
+        });
     }
     let mut regs = RegFile::default();
     for op in &prog.ops[..k] {
@@ -237,9 +284,12 @@ impl RegFile {
     fn eval(&self, o: Operand) -> Result<u64, SimError> {
         match o {
             Operand::Imm(v) => Ok(v),
-            Operand::Reg(r) => {
-                self.regs.get(r).copied().flatten().ok_or(SimError::UndefinedReg(r))
-            }
+            Operand::Reg(r) => self
+                .regs
+                .get(r)
+                .copied()
+                .flatten()
+                .ok_or(SimError::UndefinedReg(r)),
         }
     }
 }
@@ -257,10 +307,10 @@ fn step(
         Op::CpuIdHoisted { dst } => regs.set(dst, start_cpu as u64),
         Op::Const { dst, value } => regs.set(dst, value),
         Op::Param { dst, index } => {
-            let v = params
-                .get(index)
-                .copied()
-                .ok_or(SimError::MissingParam { index, nparams: params.len() })?;
+            let v = params.get(index).copied().ok_or(SimError::MissingParam {
+                index,
+                nparams: params.len(),
+            })?;
             regs.set(dst, v);
         }
         Op::Load { dst, addr } => {

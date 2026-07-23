@@ -34,8 +34,14 @@ mod real {
     use rseq::rt::{self, PerCpuCounter, RseqArea};
     use rseq::sys;
 
-    const ARMS: &[&str] =
-        &["rseq-jit-pad", "rseq-jit-nopad", "rseq-asm-nopad", "atomic-shard", "atomic-shared", "mutex"];
+    const ARMS: &[&str] = &[
+        "rseq-jit-pad",
+        "rseq-jit-nopad",
+        "rseq-asm-nopad",
+        "atomic-shard",
+        "atomic-shared",
+        "mutex",
+    ];
 
     // ---------- entropy ----------
 
@@ -108,10 +114,14 @@ mod real {
 
     fn domains() -> Vec<Domain> {
         let allowed = sys::sched_getaffinity_self();
-        let mut out = vec![Domain { name: "all", mask: allowed }];
-        for (name, path) in
-            [("pcore", "/sys/devices/cpu_core/cpus"), ("ecore", "/sys/devices/cpu_atom/cpus")]
-        {
+        let mut out = vec![Domain {
+            name: "all",
+            mask: allowed,
+        }];
+        for (name, path) in [
+            ("pcore", "/sys/devices/cpu_core/cpus"),
+            ("ecore", "/sys/devices/cpu_atom/cpus"),
+        ] {
             if let Ok(s) = fs::read_to_string(path) {
                 let mask = parse_cpu_list(&s) & allowed;
                 if mask != 0 {
@@ -156,8 +166,16 @@ mod real {
                 .collect();
             spans = handles.into_iter().map(|h| h.join().unwrap()).collect();
         });
-        let start = spans.iter().map(|s| s.0).min().expect("at least one thread");
-        let end = spans.iter().map(|s| s.1).max().expect("at least one thread");
+        let start = spans
+            .iter()
+            .map(|s| s.0)
+            .min()
+            .expect("at least one thread");
+        let end = spans
+            .iter()
+            .map(|s| s.1)
+            .max()
+            .expect("at least one thread");
         (end - start).as_nanos() as u64
     }
 
@@ -199,13 +217,17 @@ mod real {
                     aborts.fetch_add(local, Ordering::Relaxed);
                 });
                 assert_eq!(counter.sum(), total, "{arm}: lost or doubled commits");
-                Sample { ns, aborts: aborts.into_inner() }
+                Sample {
+                    ns,
+                    aborts: aborts.into_inner(),
+                }
             }
             "atomic-shard" => {
                 #[repr(align(64))]
                 struct Padded(AtomicU64);
-                let shards: Vec<Padded> =
-                    (0..rt::MAX_CPUS).map(|_| Padded(AtomicU64::new(0))).collect();
+                let shards: Vec<Padded> = (0..rt::MAX_CPUS)
+                    .map(|_| Padded(AtomicU64::new(0)))
+                    .collect();
                 let ns = timed(threads, mask, ops, |n| {
                     let a = area();
                     for _ in 0..n {
@@ -246,9 +268,8 @@ mod real {
 
     fn metadata_lines() -> String {
         let mut out = String::new();
-        let governor =
-            fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
-                .unwrap_or_else(|_| "unknown".into());
+        let governor = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+            .unwrap_or_else(|_| "unknown".into());
         let model = fs::read_to_string("/proc/cpuinfo")
             .ok()
             .and_then(|s| {
@@ -260,7 +281,11 @@ mod real {
         let rev = std::process::Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
             .output()
-            .ok().map_or_else(|| "unknown".into(), |o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            .ok()
+            .map_or_else(
+                || "unknown".into(),
+                |o| String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            );
         let _ = writeln!(out, "# cpu: {model}");
         let _ = writeln!(out, "# governor: {}", governor.trim());
         let _ = writeln!(out, "# git: {rev}");
@@ -286,9 +311,8 @@ mod real {
             eprintln!("rseq unavailable; cannot benchmark");
             std::process::exit(1);
         }
-        let governor =
-            fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
-                .unwrap_or_default();
+        let governor = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+            .unwrap_or_default();
         if governor.trim() != "performance" {
             eprintln!(
                 "note: cpufreq governor is '{}', not 'performance' — noisier blocks, \
@@ -300,8 +324,11 @@ mod real {
         let mut rng = Rng::fresh();
         let fresh = !std::path::Path::new(path).exists();
         let first = next_block_id(path);
-        let mut file =
-            fs::OpenOptions::new().append(true).create(true).open(path).expect("open csv");
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .expect("open csv");
         let _ = write!(file, "{}", metadata_lines());
         if fresh {
             let _ = writeln!(file, "block,domain,threads,ops,arm,ns,mops,aborts");
@@ -378,7 +405,11 @@ mod real {
             return f64::NAN;
         }
         let n = xs.len();
-        if n % 2 == 1 { xs[n / 2] } else { f64::midpoint(xs[n / 2 - 1], xs[n / 2]) }
+        if n % 2 == 1 {
+            xs[n / 2]
+        } else {
+            f64::midpoint(xs[n / 2 - 1], xs[n / 2])
+        }
     }
 
     fn bucket(threads: usize) -> &'static str {
@@ -405,8 +436,13 @@ mod real {
         let mut abort_rates: BTreeMap<(String, &'static str), Vec<f64>> = BTreeMap::new();
         for r in &rows {
             let key = (format!("{}|{}", r.domain, r.threads), r.block);
-            blocks.entry(key.clone()).or_default().insert(r.arm.clone(), r.mops);
-            buckets.entry(key).or_insert((r.domain.clone(), bucket(r.threads)));
+            blocks
+                .entry(key.clone())
+                .or_default()
+                .insert(r.arm.clone(), r.mops);
+            buckets
+                .entry(key)
+                .or_insert((r.domain.clone(), bucket(r.threads)));
             if r.arm == "rseq-asm-nopad" && r.ops > 0 {
                 abort_rates
                     .entry((r.domain.clone(), bucket(r.threads)))
@@ -418,15 +454,18 @@ mod real {
         // (domain, thread-bucket).
         let mut cells: BTreeMap<(String, &'static str, String), Cell> = BTreeMap::new();
         for (key, arms) in &blocks {
-            let Some((domain, bkt)) = buckets.get(key).cloned() else { continue };
+            let Some((domain, bkt)) = buckets.get(key).cloned() else {
+                continue;
+            };
             let mutex = arms.get("mutex").copied();
             for (arm, mops) in arms {
                 let cell = cells.entry((domain.clone(), bkt, arm.clone())).or_default();
                 cell.0.push(*mops);
                 if let Some(m) = mutex
-                    && m > 0.0 {
-                        cell.1.push(mops / m);
-                    }
+                    && m > 0.0
+                {
+                    cell.1.push(mops / m);
+                }
             }
         }
         println!(

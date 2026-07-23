@@ -20,7 +20,10 @@ fn counter_inc_survives_all_abort_schedules() {
         CheckConfig::default(),
     )
     .expect("counter_inc must check");
-    assert!(stats.schedules > 100, "expected exhaustive enumeration, got {stats:?}");
+    assert!(
+        stats.schedules > 100,
+        "expected exhaustive enumeration, got {stats:?}"
+    );
 }
 
 #[test]
@@ -50,10 +53,16 @@ fn hoisted_cpu_id_is_caught_as_foreign_commit() {
     )
     .expect_err("the hoisted CPU id must be caught");
     assert!(
-        matches!(failure.kind, FailureKind::Sim(SimError::ForeignCommit { .. })),
+        matches!(
+            failure.kind,
+            FailureKind::Sim(SimError::ForeignCommit { .. })
+        ),
         "expected ForeignCommit, got {failure:?}"
     );
-    assert!(!failure.plan.is_empty(), "only a migration can expose the bug: {failure:?}");
+    assert!(
+        !failure.plan.is_empty(),
+        "only a migration can expose the bug: {failure:?}"
+    );
 }
 
 #[test]
@@ -62,7 +71,9 @@ fn post_commit_abort_window_is_caught() {
     // an abort delivered after the commit restarts and double-increments.
     let (layout, prog, counters) = progs::counter_inc();
     let cfg = CheckConfig {
-        sim: rseq::sim::SimConfig { post_commit_in_window: true },
+        sim: rseq::sim::SimConfig {
+            post_commit_in_window: true,
+        },
         ..CheckConfig::default()
     };
     let failure = check::check(
@@ -141,8 +152,15 @@ fn freelist_pop_survives_all_abort_schedules() {
 fn freelist_pop_from_empty_exits_consistently() {
     let fl = progs::freelist(8);
     let prog = fl.pop();
-    check::check(&prog, &fl.layout, no_setup, |mem| lists(mem, &fl), &[], CheckConfig::default())
-        .expect("pop from empty lists must check");
+    check::check(
+        &prog,
+        &fl.layout,
+        no_setup,
+        |mem| lists(mem, &fl),
+        &[],
+        CheckConfig::default(),
+    )
+    .expect("pop from empty lists must check");
 }
 
 #[test]
@@ -159,8 +177,15 @@ fn array_push_survives_all_abort_schedules() {
             })
             .collect()
     };
-    check::check(&prog, &pa.layout, no_setup, observe, &[], CheckConfig::default())
-        .expect("array push must check");
+    check::check(
+        &prog,
+        &pa.layout,
+        no_setup,
+        observe,
+        &[],
+        CheckConfig::default(),
+    )
+    .expect("array push must check");
 }
 
 #[test]
@@ -173,8 +198,15 @@ fn array_push_full_exits_early() {
         }
     };
     let observe = |mem: &Memory| mem.region(pa.committed).to_vec();
-    check::check(&prog, &pa.layout, setup, observe, &[], CheckConfig::default())
-        .expect("push to full arrays must exit early consistently");
+    check::check(
+        &prog,
+        &pa.layout,
+        setup,
+        observe,
+        &[],
+        CheckConfig::default(),
+    )
+    .expect("push to full arrays must exit early consistently");
 }
 
 #[test]
@@ -188,12 +220,20 @@ fn observing_raw_scratch_is_too_strict() {
         &prog,
         &pa.layout,
         no_setup,
-        |mem| (mem.region(pa.committed).to_vec(), mem.region(pa.slots).to_vec()),
+        |mem| {
+            (
+                mem.region(pa.committed).to_vec(),
+                mem.region(pa.slots).to_vec(),
+            )
+        },
         &[],
         CheckConfig::default(),
     )
     .expect_err("raw scratch differs between aborted and clean runs");
-    assert!(matches!(failure.kind, FailureKind::ObservableMismatch { .. }), "{failure:?}");
+    assert!(
+        matches!(failure.kind, FailureKind::ObservableMismatch { .. }),
+        "{failure:?}"
+    );
 }
 
 #[test]
@@ -202,25 +242,50 @@ fn validation_rejects_malformed_programs() {
     assert!(good.validate(&layout).is_ok());
 
     let commit = |src: u64| Op::Commit {
-        addr: Addr { region: counters, index: Operand::Imm(0) },
+        addr: Addr {
+            region: counters,
+            index: Operand::Imm(0),
+        },
         src: Operand::Imm(src),
     };
 
-    let empty = Program { name: "empty".into(), ops: vec![], ret: None };
+    let empty = Program {
+        name: "empty".into(),
+        ops: vec![],
+        ret: None,
+    };
     assert_eq!(empty.validate(&layout), Err(ValidateError::Empty));
 
-    let two_commits =
-        Program { name: "two_commits".into(), ops: vec![commit(1), commit(2)], ret: None };
-    assert_eq!(two_commits.validate(&layout), Err(ValidateError::CommitNotLast { at: 0 }));
+    let two_commits = Program {
+        name: "two_commits".into(),
+        ops: vec![commit(1), commit(2)],
+        ret: None,
+    };
+    assert_eq!(
+        two_commits.validate(&layout),
+        Err(ValidateError::CommitNotLast { at: 0 })
+    );
 
-    let no_commit =
-        Program { name: "no_commit".into(), ops: vec![Op::CpuId { dst: 0 }], ret: None };
-    assert_eq!(no_commit.validate(&layout), Err(ValidateError::MissingCommit));
+    let no_commit = Program {
+        name: "no_commit".into(),
+        ops: vec![Op::CpuId { dst: 0 }],
+        ret: None,
+    };
+    assert_eq!(
+        no_commit.validate(&layout),
+        Err(ValidateError::MissingCommit)
+    );
 
     let use_before_def = Program {
         name: "use_before_def".into(),
         ops: vec![
-            Op::Load { dst: 0, addr: Addr { region: counters, index: Operand::Reg(7) } },
+            Op::Load {
+                dst: 0,
+                addr: Addr {
+                    region: counters,
+                    index: Operand::Reg(7),
+                },
+            },
             commit(1),
         ],
         ret: None,
@@ -234,7 +299,10 @@ fn validation_rejects_malformed_programs() {
         name: "scratch_to_published".into(),
         ops: vec![
             Op::StoreScratch {
-                addr: Addr { region: counters, index: Operand::Imm(0) },
+                addr: Addr {
+                    region: counters,
+                    index: Operand::Imm(0),
+                },
                 src: Operand::Imm(9),
             },
             commit(1),
@@ -243,14 +311,20 @@ fn validation_rejects_malformed_programs() {
     };
     assert_eq!(
         scratch_to_published.validate(&layout),
-        Err(ValidateError::ScratchStoreToPublished { at: 0, region: counters })
+        Err(ValidateError::ScratchStoreToPublished {
+            at: 0,
+            region: counters
+        })
     );
 
     let fl = progs::freelist(2);
     let commit_to_scratch = Program {
         name: "commit_to_scratch".into(),
         ops: vec![Op::Commit {
-            addr: Addr { region: fl.nodes, index: Operand::Imm(0) },
+            addr: Addr {
+                region: fl.nodes,
+                index: Operand::Imm(0),
+            },
             src: Operand::Imm(1),
         }],
         ret: None,
@@ -265,15 +339,27 @@ fn validation_rejects_malformed_programs() {
     b.exit_if(rseq::ir::Cond::Eq, reg(cpu), imm(9));
     b.exit_if(rseq::ir::Cond::Eq, reg(cpu), imm(8));
     let two_exits = b.commit(counters, reg(cpu), imm(1));
-    assert_eq!(two_exits.validate(&layout), Err(ValidateError::MultipleExits { at: 2 }));
+    assert_eq!(
+        two_exits.validate(&layout),
+        Err(ValidateError::MultipleExits { at: 2 })
+    );
 }
 
 #[test]
 fn deeper_schedules_still_pass_for_counter() {
     let (layout, prog, counters) = progs::counter_inc();
-    let cfg = CheckConfig { max_aborts: 3, ..CheckConfig::default() };
-    let stats =
-        check::check(&prog, &layout, no_setup, |mem| mem.region(counters).to_vec(), &[], cfg)
-            .expect("counter_inc must check at depth 3");
+    let cfg = CheckConfig {
+        max_aborts: 3,
+        ..CheckConfig::default()
+    };
+    let stats = check::check(
+        &prog,
+        &layout,
+        no_setup,
+        |mem| mem.region(counters).to_vec(),
+        &[],
+        cfg,
+    )
+    .expect("counter_inc must check at depth 3");
     assert!(stats.schedules > 1000, "{stats:?}");
 }

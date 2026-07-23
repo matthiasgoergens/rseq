@@ -25,13 +25,13 @@ pub enum Operand {
 }
 
 /// Shorthand for `Operand::Reg`.
-#[must_use] 
+#[must_use]
 pub fn reg(r: Reg) -> Operand {
     Operand::Reg(r)
 }
 
 /// Shorthand for `Operand::Imm`.
-#[must_use] 
+#[must_use]
 pub fn imm(v: u64) -> Operand {
     Operand::Imm(v)
 }
@@ -71,27 +71,55 @@ pub struct Addr {
 pub enum Op {
     /// Read the *current* CPU id. Re-executes on every restart, so it is
     /// always fresh — this is the correct way to index per-CPU data.
-    CpuId { dst: Reg },
+    CpuId {
+        dst: Reg,
+    },
     /// Deliberately wrong: models a CPU id that was read once, before the
     /// sequence, and cached (the classic hoisting bug). The simulator returns
     /// the CPU the run *started* on, ignoring migrations. Exists so tests can
     /// demonstrate that the checker catches this bug class.
-    CpuIdHoisted { dst: Reg },
-    Const { dst: Reg, value: u64 },
+    CpuIdHoisted {
+        dst: Reg,
+    },
+    Const {
+        dst: Reg,
+        value: u64,
+    },
     /// Read runtime argument `index` (e.g. the node being pushed). Arguments
     /// are fixed for the duration of a run, so re-reading after an abort is
     /// safe by construction.
-    Param { dst: Reg, index: usize },
-    Load { dst: Reg, addr: Addr },
-    Bin { dst: Reg, op: BinOp, lhs: Operand, rhs: Operand },
+    Param {
+        dst: Reg,
+        index: usize,
+    },
+    Load {
+        dst: Reg,
+        addr: Addr,
+    },
+    Bin {
+        dst: Reg,
+        op: BinOp,
+        lhs: Operand,
+        rhs: Operand,
+    },
     /// Early exit without committing (e.g. "freelist is empty").
-    ExitIf { cond: Cond, lhs: Operand, rhs: Operand },
+    ExitIf {
+        cond: Cond,
+        lhs: Operand,
+        rhs: Operand,
+    },
     /// Write to unpublished scratch memory. Replay-safe by construction: no
     /// other actor may observe scratch, so re-executing after an abort is
     /// harmless (the tcmalloc scribble-then-bump trick).
-    StoreScratch { addr: Addr, src: Operand },
+    StoreScratch {
+        addr: Addr,
+        src: Operand,
+    },
     /// The single committing store. Must be the final operation.
-    Commit { addr: Addr, src: Operand },
+    Commit {
+        addr: Addr,
+        src: Operand,
+    },
 }
 
 /// Declaration of a memory region.
@@ -120,7 +148,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -131,22 +159,46 @@ impl Layout {
     }
 
     pub fn published_per_cpu(&mut self, name: &str, words: usize, init: u64) -> RegionId {
-        self.add(RegionDecl { name: name.into(), published: true, per_cpu: true, words, init })
+        self.add(RegionDecl {
+            name: name.into(),
+            published: true,
+            per_cpu: true,
+            words,
+            init,
+        })
     }
 
     pub fn published_shared(&mut self, name: &str, words: usize, init: u64) -> RegionId {
-        self.add(RegionDecl { name: name.into(), published: true, per_cpu: false, words, init })
+        self.add(RegionDecl {
+            name: name.into(),
+            published: true,
+            per_cpu: false,
+            words,
+            init,
+        })
     }
 
     pub fn scratch_per_cpu(&mut self, name: &str, words: usize, init: u64) -> RegionId {
-        self.add(RegionDecl { name: name.into(), published: false, per_cpu: true, words, init })
+        self.add(RegionDecl {
+            name: name.into(),
+            published: false,
+            per_cpu: true,
+            words,
+            init,
+        })
     }
 
     pub fn scratch_shared(&mut self, name: &str, words: usize, init: u64) -> RegionId {
-        self.add(RegionDecl { name: name.into(), published: false, per_cpu: false, words, init })
+        self.add(RegionDecl {
+            name: name.into(),
+            published: false,
+            per_cpu: false,
+            words,
+            init,
+        })
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn decl(&self, r: RegionId) -> &RegionDecl {
         &self.regions[r.0]
     }
@@ -243,7 +295,10 @@ impl Program {
                 Op::StoreScratch { addr, src } => {
                     check_region(at, addr.region)?;
                     if layout.decl(addr.region).published {
-                        return Err(ValidateError::ScratchStoreToPublished { at, region: addr.region });
+                        return Err(ValidateError::ScratchStoreToPublished {
+                            at,
+                            region: addr.region,
+                        });
                     }
                     check_use(at, addr.index, &defined)?;
                     check_use(at, src, &defined)?;
@@ -251,7 +306,9 @@ impl Program {
                 Op::Commit { addr, src } => {
                     check_region(at, addr.region)?;
                     if !layout.decl(addr.region).published {
-                        return Err(ValidateError::CommitToScratch { region: addr.region });
+                        return Err(ValidateError::CommitToScratch {
+                            region: addr.region,
+                        });
                     }
                     check_use(at, addr.index, &defined)?;
                     check_use(at, src, &defined)?;
@@ -263,9 +320,10 @@ impl Program {
             _ => return Err(ValidateError::MissingCommit),
         }
         if let Some(Operand::Reg(r)) = self.ret
-            && !defined.get(r).copied().unwrap_or(false) {
-                return Err(ValidateError::RetUndefined { reg: r });
-            }
+            && !defined.get(r).copied().unwrap_or(false)
+        {
+            return Err(ValidateError::RetUndefined { reg: r });
+        }
         Ok(())
     }
 
@@ -319,9 +377,13 @@ pub struct SeqBuilder {
 }
 
 impl SeqBuilder {
-    #[must_use] 
+    #[must_use]
     pub fn new(name: &str) -> Self {
-        Self { name: name.into(), ops: Vec::new(), next: 0 }
+        Self {
+            name: name.into(),
+            ops: Vec::new(),
+            next: 0,
+        }
     }
 
     fn fresh(&mut self) -> Reg {
@@ -358,7 +420,10 @@ impl SeqBuilder {
 
     pub fn load(&mut self, region: RegionId, index: Operand) -> Reg {
         let dst = self.fresh();
-        self.ops.push(Op::Load { dst, addr: Addr { region, index } });
+        self.ops.push(Op::Load {
+            dst,
+            addr: Addr { region, index },
+        });
         dst
     }
 
@@ -373,16 +438,25 @@ impl SeqBuilder {
     }
 
     pub fn store_scratch(&mut self, region: RegionId, index: Operand, src: Operand) {
-        self.ops.push(Op::StoreScratch { addr: Addr { region, index }, src });
+        self.ops.push(Op::StoreScratch {
+            addr: Addr { region, index },
+            src,
+        });
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn commit(self, region: RegionId, index: Operand, src: Operand) -> Program {
         self.finish(region, index, src, None)
     }
 
-    #[must_use] 
-    pub fn commit_ret(self, region: RegionId, index: Operand, src: Operand, ret: Operand) -> Program {
+    #[must_use]
+    pub fn commit_ret(
+        self,
+        region: RegionId,
+        index: Operand,
+        src: Operand,
+        ret: Operand,
+    ) -> Program {
         self.finish(region, index, src, Some(ret))
     }
 
@@ -393,7 +467,14 @@ impl SeqBuilder {
         src: Operand,
         ret: Option<Operand>,
     ) -> Program {
-        self.ops.push(Op::Commit { addr: Addr { region, index }, src });
-        Program { name: self.name, ops: self.ops, ret }
+        self.ops.push(Op::Commit {
+            addr: Addr { region, index },
+            src,
+        });
+        Program {
+            name: self.name,
+            ops: self.ops,
+            ret,
+        }
     }
 }

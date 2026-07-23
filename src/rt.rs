@@ -40,7 +40,7 @@ unsafe extern "C" {
 
 /// The current thread's rseq area, or None if glibc did not register one
 /// (pre-2.35 glibc, or a kernel without rseq).
-#[must_use] 
+#[must_use]
 pub fn current_area() -> Option<*mut RseqArea> {
     unsafe {
         if __rseq_size == 0 {
@@ -55,7 +55,11 @@ pub fn current_area() -> Option<*mut RseqArea> {
         );
         let area = (tp as isize + __rseq_offset) as *mut RseqArea;
         let cpu_id = core::ptr::read_volatile(&raw const (*area).cpu_id);
-        if (cpu_id as i32) < 0 { None } else { Some(area) }
+        if (cpu_id as i32) < 0 {
+            None
+        } else {
+            Some(area)
+        }
     }
 }
 
@@ -190,15 +194,19 @@ pub struct PerCpuCounter {
 unsafe impl Sync for PerCpuCounter {}
 
 impl PerCpuCounter {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
-        Self { slots: (0..MAX_CPUS).map(|_| UnsafeCell::new(0)).collect() }
+        Self {
+            slots: (0..MAX_CPUS).map(|_| UnsafeCell::new(0)).collect(),
+        }
     }
 
     /// Increment the current CPU's counter. Aborted-and-retried attempts add
     /// to `aborts`. Returns false if rseq is unavailable on this thread.
     pub fn inc(&self, aborts: &mut u64) -> bool {
-        let Some(area) = current_area() else { return false };
+        let Some(area) = current_area() else {
+            return false;
+        };
         unsafe {
             rseq_counter_inc(self.slots.as_ptr() as *mut u64, area, aborts);
         }
@@ -227,7 +235,7 @@ pub struct PerCpuFreelist {
 unsafe impl Sync for PerCpuFreelist {}
 
 impl PerCpuFreelist {
-    #[must_use] 
+    #[must_use]
     pub fn new(nnodes: usize) -> Self {
         Self {
             heads: (0..MAX_CPUS).map(|_| UnsafeCell::new(NIL)).collect(),
@@ -245,7 +253,9 @@ impl PerCpuFreelist {
     #[must_use]
     pub fn push(&self, node: u64) -> bool {
         assert!((node as usize) < self.nodes.len());
-        let Some(area) = current_area() else { return false };
+        let Some(area) = current_area() else {
+            return false;
+        };
         unsafe {
             rseq_freelist_push(
                 self.heads.as_ptr() as *mut u64,
@@ -260,7 +270,7 @@ impl PerCpuFreelist {
     /// Pop from the current CPU's list; None if it is empty (other CPUs'
     /// lists are not touched — cross-CPU draining needs the membarrier
     /// fence protocol, a later milestone).
-    #[must_use] 
+    #[must_use]
     pub fn pop(&self) -> Option<u64> {
         let area = current_area()?;
         let node = unsafe {

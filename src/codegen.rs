@@ -213,7 +213,10 @@ impl CompiledSeq {
     /// the complete set of abort points.
     #[must_use]
     pub fn window_insn_addrs(&self) -> Vec<usize> {
-        self.window_insns.iter().map(|o| self.base as usize + o).collect()
+        self.window_insns
+            .iter()
+            .map(|o| self.base as usize + o)
+            .collect()
     }
 }
 
@@ -259,8 +262,15 @@ fn emit(prog: &Program) -> Result<Blob, CompileError> {
         mark(o, usize::MAX, &mut last_use);
     }
 
-    let mut a = Asm { buf: vec![0u8; ENTRY_OFF], exit_patches: Vec::new(), insns: Vec::new() };
-    let mut ra = RegAlloc { map: vec![None; last_use.len().max(prog.max_reg_bound())], free: POOL.to_vec() };
+    let mut a = Asm {
+        buf: vec![0u8; ENTRY_OFF],
+        exit_patches: Vec::new(),
+        insns: Vec::new(),
+    };
+    let mut ra = RegAlloc {
+        map: vec![None; last_use.len().max(prog.max_reg_bound())],
+        free: POOL.to_vec(),
+    };
 
     // retry: lea rax, [rip + descriptor]   (descriptor is at offset 0)
     //        mov [rdi + 8], rax            (arm rseq_cs)
@@ -299,7 +309,8 @@ fn emit(prog: &Program) -> Result<Blob, CompileError> {
 
     // Early-exit stub: mov rax, -1 ; ret
     let exit_off = a.buf.len();
-    a.buf.extend_from_slice(&[0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+    a.buf
+        .extend_from_slice(&[0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
     a.buf.push(0xC3);
     for patch in a.exit_patches.clone() {
         let disp = (exit_off as i64 - (patch as i64 + 4)) as i32;
@@ -313,9 +324,20 @@ fn emit(prog: &Program) -> Result<Blob, CompileError> {
     let disp = (retry_off as i64 - (a.buf.len() as i64 + 4)) as i32;
     a.imm32(disp);
 
-    let window_insns =
-        a.insns.iter().copied().filter(|&o| o >= start_off && o < post_off).collect();
-    Ok(Blob { buf: a.buf, start_off, post_off, abort_off, retry_off, window_insns })
+    let window_insns = a
+        .insns
+        .iter()
+        .copied()
+        .filter(|&o| o >= start_off && o < post_off)
+        .collect();
+    Ok(Blob {
+        buf: a.buf,
+        start_off,
+        post_off,
+        abort_off,
+        retry_off,
+        window_insns,
+    })
 }
 
 // One match arm per op; splitting it would scatter the encoding logic.
@@ -501,9 +523,8 @@ impl Asm {
     }
 
     fn rex(&mut self, w: bool, r: u8, x: u8, b: u8) {
-        self.buf.push(
-            0x40 | (u8::from(w) << 3) | ((r >> 3) << 2) | ((x >> 3) << 1) | (b >> 3),
-        );
+        self.buf
+            .push(0x40 | (u8::from(w) << 3) | ((r >> 3) << 2) | ((x >> 3) << 1) | (b >> 3));
     }
 
     /// REX only when needed (for 32-bit ops touching r8..r15).
@@ -518,7 +539,8 @@ impl Asm {
     }
 
     fn sib(&mut self, scale: u8, index: u8, base: u8) {
-        self.buf.push((scale << 6) | ((index & 7) << 3) | (base & 7));
+        self.buf
+            .push((scale << 6) | ((index & 7) << 3) | (base & 7));
     }
 
     fn imm32(&mut self, v: i32) {
@@ -567,7 +589,10 @@ impl RegAlloc {
             .get(r)
             .copied()
             .flatten()
-            .ok_or(CompileError::Invalid(ValidateError::UseBeforeDef { at: 0, reg: r }))
+            .ok_or(CompileError::Invalid(ValidateError::UseBeforeDef {
+                at: 0,
+                reg: r,
+            }))
     }
 
     fn operand_phys(&self, o: Operand) -> Result<Option<u8>, CompileError> {
@@ -632,12 +657,20 @@ impl RegionSet {
             .regions
             .iter()
             .map(|d| {
-                let len = if d.per_cpu { d.words * MAX_CPUS } else { d.words };
+                let len = if d.per_cpu {
+                    d.words * MAX_CPUS
+                } else {
+                    d.words
+                };
                 (0..len).map(|_| UnsafeCell::new(d.init)).collect()
             })
             .collect();
         let bases = allocs.iter().map(|a| a.as_ptr() as u64).collect();
-        Self { layout: layout.clone(), allocs, bases }
+        Self {
+            layout: layout.clone(),
+            allocs,
+            bases,
+        }
     }
 
     /// Run `seq` on the current thread. Returns the sequence's result
@@ -700,4 +733,3 @@ impl RegionSet {
         unsafe { core::slice::from_raw_parts_mut(a.as_mut_ptr().cast::<u64>(), a.len()) }
     }
 }
-

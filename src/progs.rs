@@ -7,7 +7,7 @@ use crate::ir::{BinOp, Cond, Layout, Program, RegionId, SeqBuilder, imm, reg};
 pub const NIL: u64 = u64::MAX;
 
 /// Per-CPU counter increment: the "hello world" of restartable sequences.
-#[must_use] 
+#[must_use]
 pub fn counter_inc() -> (Layout, Program, RegionId) {
     let mut layout = Layout::new();
     let counters = layout.published_per_cpu("counters", 1, 0);
@@ -37,7 +37,7 @@ pub fn counter_inc_strided(words_per_cpu: usize) -> (Layout, Program, RegionId) 
 
 /// The hoisting bug: the CPU id is read once before the sequence and cached,
 /// so after a migration the commit targets the *old* CPU's counter.
-#[must_use] 
+#[must_use]
 pub fn counter_inc_hoisted() -> (Layout, Program, RegionId) {
     let mut layout = Layout::new();
     let counters = layout.published_per_cpu("counters", 1, 0);
@@ -65,7 +65,12 @@ pub fn freelist(nnodes: usize) -> Freelist {
     let mut layout = Layout::new();
     let heads = layout.published_per_cpu("heads", 1, NIL);
     let nodes = layout.scratch_shared("nodes", nnodes, NIL);
-    Freelist { layout, heads, nodes, nnodes }
+    Freelist {
+        layout,
+        heads,
+        nodes,
+        nnodes,
+    }
 }
 
 impl Freelist {
@@ -83,7 +88,7 @@ impl Freelist {
 
     /// Pop from the current CPU's freelist; exits early if empty, otherwise
     /// returns the popped node.
-    #[must_use] 
+    #[must_use]
     pub fn pop(&self) -> Program {
         let mut b = SeqBuilder::new("freelist_pop");
         let cpu = b.cpu_id();
@@ -104,17 +109,22 @@ pub struct PushArray {
 /// The tcmalloc trick: scribble the new element into the uncommitted region
 /// of a per-CPU array (scratch), then publish it by bumping the committed
 /// index with the single committing store.
-#[must_use] 
+#[must_use]
 pub fn push_array(cap: usize) -> PushArray {
     let mut layout = Layout::new();
     let committed = layout.published_per_cpu("committed", 1, 0);
     let slots = layout.scratch_per_cpu("slots", cap, 0);
-    PushArray { layout, committed, slots, cap }
+    PushArray {
+        layout,
+        committed,
+        slots,
+        cap,
+    }
 }
 
 impl PushArray {
     /// Push `value` onto the current CPU's array; exits early if full.
-    #[must_use] 
+    #[must_use]
     pub fn push(&self, value: u64) -> Program {
         let mut b = SeqBuilder::new("array_push");
         let cpu = b.cpu_id();
