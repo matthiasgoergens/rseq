@@ -90,6 +90,7 @@ pub enum SimError {
     ForeignCommit { region: RegionId, index: usize, running_on: usize, owner: usize },
     UndefinedReg(Reg),
     BadCpu { cpu: usize, ncpus: usize },
+    MissingParam { index: usize, nparams: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +138,7 @@ pub struct RunResult {
 pub fn run(
     prog: &Program,
     mem: &mut Memory,
+    params: &[u64],
     start_cpu: usize,
     plan: &[AbortPoint],
     cfg: SimConfig,
@@ -159,7 +161,7 @@ pub fn run(
                     pending = plan_iter.next();
                     continue 'attempt;
                 }
-            match step(op, &mut regs, mem, cpu, start_cpu)? {
+            match step(op, &mut regs, mem, params, cpu, start_cpu)? {
                 Step::Continue => {}
                 Step::Exit => {
                     return Ok(RunResult { outcome: Outcome::Exited, final_cpu: cpu });
@@ -194,13 +196,19 @@ pub fn run(
 /// # Errors
 ///
 /// Same failure modes as [`run`].
-pub fn run_prefix(prog: &Program, mem: &mut Memory, cpu: usize, k: usize) -> Result<(), SimError> {
+pub fn run_prefix(
+    prog: &Program,
+    mem: &mut Memory,
+    params: &[u64],
+    cpu: usize,
+    k: usize,
+) -> Result<(), SimError> {
     if cpu >= mem.ncpus {
         return Err(SimError::BadCpu { cpu, ncpus: mem.ncpus });
     }
     let mut regs = RegFile::default();
     for op in &prog.ops[..k] {
-        match step(op, &mut regs, mem, cpu, cpu)? {
+        match step(op, &mut regs, mem, params, cpu, cpu)? {
             Step::Continue => {}
             Step::Exit => return Ok(()),
         }
@@ -240,6 +248,7 @@ fn step(
     op: &Op,
     regs: &mut RegFile,
     mem: &mut Memory,
+    params: &[u64],
     cpu: usize,
     start_cpu: usize,
 ) -> Result<Step, SimError> {
@@ -247,6 +256,13 @@ fn step(
         Op::CpuId { dst } => regs.set(dst, cpu as u64),
         Op::CpuIdHoisted { dst } => regs.set(dst, start_cpu as u64),
         Op::Const { dst, value } => regs.set(dst, value),
+        Op::Param { dst, index } => {
+            let v = params
+                .get(index)
+                .copied()
+                .ok_or(SimError::MissingParam { index, nparams: params.len() })?;
+            regs.set(dst, v);
+        }
         Op::Load { dst, addr } => {
             let index = index_of(regs, addr)?;
             let v = mem.read(addr.region, index)?;

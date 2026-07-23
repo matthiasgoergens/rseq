@@ -29,11 +29,18 @@ The design here is one IR with three backends:
    laws that any lost or doubled commit would break. These are the bytes the
    IR backend must learn to emit, and their tests are the harness generated
    code must pass.
-3. **Codegen** (next): the same IR emits the asm template plus its `rseq_cs`
-   descriptor.
-4. **ptrace conformance harness** (later): single-step the real binary to
+3. **Codegen** (done): a small JIT compiles the same IR the checker verified
+   into executable x86-64 machine code, descriptor included — one anonymous
+   mapping holding the 32-byte-aligned `rseq_cs` at offset 0 and the
+   arm/start/commit/exit/abort code after it, W^X protected. Runtime
+   parameters (`Op::Param`) let one compiled push serve every node. The
+   compiled programs pass the same live-kernel stress harness as the
+   hand-written ones and agree with the simulator on single-threaded runs,
+   so model-checked and executed programs are now the same artifact.
+4. **ptrace conformance harness** (next): single-step the real binary to
    every abort point and inject signals/migrations against the live kernel,
-   closing the gap between the checked IR and the linked bytes.
+   closing the gap between the checked IR and the emitted bytes (descriptor
+   placement, window bounds, signature).
 
 ## Layout
 
@@ -49,8 +56,15 @@ The design here is one IR with three backends:
 - [src/progs.rs](src/progs.rs) — example programs: per-CPU counter, per-CPU
   freelist push/pop, tcmalloc-style array push, plus deliberately buggy
   variants the checker must reject.
-- [tests/model.rs](tests/model.rs) — the checker run against all of the
-  above.
+- [src/rt.rs](src/rt.rs) — live-kernel runtime: rseq-area access via glibc's
+  `__rseq_offset`, plus hand-written asm sequences with descriptors.
+- [src/codegen.rs](src/codegen.rs) — the JIT: x86-64 encoder, linear-scan
+  register allocation, descriptor emission, raw-syscall mmap, and
+  `RegionSet` for driving compiled programs.
+- [tests/model.rs](tests/model.rs) — the checker run against the example
+  programs; [tests/kernel.rs](tests/kernel.rs) and
+  [tests/codegen.rs](tests/codegen.rs) — live-kernel stress and
+  sim-equivalence tests for hand-written and compiled sequences.
 
 ## Running
 

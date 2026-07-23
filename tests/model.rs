@@ -16,6 +16,7 @@ fn counter_inc_survives_all_abort_schedules() {
         &layout,
         no_setup,
         |mem| mem.region(counters).to_vec(),
+        &[],
         CheckConfig::default(),
     )
     .expect("counter_inc must check");
@@ -30,6 +31,7 @@ fn hoisted_cpu_id_is_caught_as_foreign_commit() {
         &layout,
         no_setup,
         |mem| mem.region(counters).to_vec(),
+        &[],
         CheckConfig::default(),
     )
     .expect_err("the hoisted CPU id must be caught");
@@ -54,6 +56,7 @@ fn post_commit_abort_window_is_caught() {
         &layout,
         no_setup,
         |mem| mem.region(counters).to_vec(),
+        &[],
         cfg,
     )
     .expect_err("a post-commit restart must be observable");
@@ -93,24 +96,38 @@ fn populate(fl: &Freelist) -> impl Fn(&mut Memory) + '_ {
 #[test]
 fn freelist_push_survives_all_abort_schedules() {
     let fl = progs::freelist(8);
-    let prog = fl.push(5);
-    check::check(&prog, &fl.layout, populate(&fl), |mem| lists(mem, &fl), CheckConfig::default())
-        .expect("freelist push must check");
+    let prog = fl.push();
+    check::check(
+        &prog,
+        &fl.layout,
+        populate(&fl),
+        |mem| lists(mem, &fl),
+        &[5],
+        CheckConfig::default(),
+    )
+    .expect("freelist push must check");
 }
 
 #[test]
 fn freelist_pop_survives_all_abort_schedules() {
     let fl = progs::freelist(8);
     let prog = fl.pop();
-    check::check(&prog, &fl.layout, populate(&fl), |mem| lists(mem, &fl), CheckConfig::default())
-        .expect("freelist pop must check");
+    check::check(
+        &prog,
+        &fl.layout,
+        populate(&fl),
+        |mem| lists(mem, &fl),
+        &[],
+        CheckConfig::default(),
+    )
+    .expect("freelist pop must check");
 }
 
 #[test]
 fn freelist_pop_from_empty_exits_consistently() {
     let fl = progs::freelist(8);
     let prog = fl.pop();
-    check::check(&prog, &fl.layout, no_setup, |mem| lists(mem, &fl), CheckConfig::default())
+    check::check(&prog, &fl.layout, no_setup, |mem| lists(mem, &fl), &[], CheckConfig::default())
         .expect("pop from empty lists must check");
 }
 
@@ -128,7 +145,7 @@ fn array_push_survives_all_abort_schedules() {
             })
             .collect()
     };
-    check::check(&prog, &pa.layout, no_setup, observe, CheckConfig::default())
+    check::check(&prog, &pa.layout, no_setup, observe, &[], CheckConfig::default())
         .expect("array push must check");
 }
 
@@ -142,7 +159,7 @@ fn array_push_full_exits_early() {
         }
     };
     let observe = |mem: &Memory| mem.region(pa.committed).to_vec();
-    check::check(&prog, &pa.layout, setup, observe, CheckConfig::default())
+    check::check(&prog, &pa.layout, setup, observe, &[], CheckConfig::default())
         .expect("push to full arrays must exit early consistently");
 }
 
@@ -158,6 +175,7 @@ fn observing_raw_scratch_is_too_strict() {
         &pa.layout,
         no_setup,
         |mem| (mem.region(pa.committed).to_vec(), mem.region(pa.slots).to_vec()),
+        &[],
         CheckConfig::default(),
     )
     .expect_err("raw scratch differs between aborted and clean runs");
@@ -241,7 +259,7 @@ fn deeper_schedules_still_pass_for_counter() {
     let (layout, prog, counters) = progs::counter_inc();
     let cfg = CheckConfig { max_aborts: 3, ..CheckConfig::default() };
     let stats =
-        check::check(&prog, &layout, no_setup, |mem| mem.region(counters).to_vec(), cfg)
+        check::check(&prog, &layout, no_setup, |mem| mem.region(counters).to_vec(), &[], cfg)
             .expect("counter_inc must check at depth 3");
     assert!(stats.schedules > 1000, "{stats:?}");
 }

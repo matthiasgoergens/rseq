@@ -71,6 +71,7 @@ pub fn check<V, S, O>(
     layout: &Layout,
     setup: S,
     observe: O,
+    params: &[u64],
     cfg: CheckConfig,
 ) -> Result<Stats, CheckFailure>
 where
@@ -90,7 +91,7 @@ where
             let mut mem = Memory::new(layout, cfg.ncpus);
             setup(&mut mem);
             let before = mem.published_snapshot();
-            if let Err(e) = sim::run_prefix(prog, &mut mem, cpu, k) {
+            if let Err(e) = sim::run_prefix(prog, &mut mem, params, cpu, k) {
                 return Err(CheckFailure {
                     start_cpu: cpu,
                     plan: vec![],
@@ -120,19 +121,25 @@ where
     // Phase 2: restart equivalence over all abort schedules.
     let max_at = prog.ops.len() + usize::from(cfg.sim.post_commit_in_window);
     let mut plan: Vec<AbortPoint> = Vec::new();
+    let env = Env { prog, layout, params, cfg: &cfg };
     for start_cpu in 0..cfg.ncpus {
-        check_schedules(prog, layout, &setup, &observe, &cfg, start_cpu, &mut plan, &mut stats, max_at)?;
+        check_schedules(&env, &setup, &observe, start_cpu, &mut plan, &mut stats, max_at)?;
     }
     Ok(stats)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Everything that stays fixed across one `check` invocation.
+struct Env<'a> {
+    prog: &'a Program,
+    layout: &'a Layout,
+    params: &'a [u64],
+    cfg: &'a CheckConfig,
+}
+
 fn check_schedules<V, S, O>(
-    prog: &Program,
-    layout: &Layout,
+    env: &Env<'_>,
     setup: &S,
     observe: &O,
-    cfg: &CheckConfig,
     start_cpu: usize,
     plan: &mut Vec<AbortPoint>,
     stats: &mut Stats,
@@ -143,27 +150,24 @@ where
     S: Fn(&mut Memory),
     O: Fn(&Memory) -> V,
 {
-    run_one(prog, layout, setup, observe, cfg, start_cpu, plan, stats)?;
-    if plan.len() == cfg.max_aborts {
+    run_one(env, setup, observe, start_cpu, plan, stats)?;
+    if plan.len() == env.cfg.max_aborts {
         return Ok(());
     }
     for at in 0..max_at {
-        for new_cpu in 0..cfg.ncpus {
+        for new_cpu in 0..env.cfg.ncpus {
             plan.push(AbortPoint { at, new_cpu });
-            check_schedules(prog, layout, setup, observe, cfg, start_cpu, plan, stats, max_at)?;
+            check_schedules(env, setup, observe, start_cpu, plan, stats, max_at)?;
             plan.pop();
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_one<V, S, O>(
-    prog: &Program,
-    layout: &Layout,
+    env: &Env<'_>,
     setup: &S,
     observe: &O,
-    cfg: &CheckConfig,
     start_cpu: usize,
     plan: &[AbortPoint],
     stats: &mut Stats,
@@ -176,19 +180,20 @@ where
     stats.schedules += 1;
     let fail = |kind| CheckFailure { start_cpu, plan: plan.to_vec(), kind };
 
-    let mut mem = Memory::new(layout, cfg.ncpus);
+    let mut mem = Memory::new(env.layout, env.cfg.ncpus);
     setup(&mut mem);
-    let got = sim::run(prog, &mut mem, start_cpu, plan, cfg.sim)
+    let got = sim::run(env.prog, &mut mem, env.params, start_cpu, plan, env.cfg.sim)
         .map_err(|e| fail(FailureKind::Sim(e)))?;
 
     // The final attempt runs entirely on the CPU the run actually finished
     // on, so the reference is a clean run on that CPU from the same initial
     // state. (Plan entries positioned past an early exit never fire, so this
     // is the simulator-reported final CPU, not the plan's last entry.)
-    let mut want_mem = Memory::new(layout, cfg.ncpus);
+    let mut want_mem = Memory::new(env.layout, env.cfg.ncpus);
     setup(&mut want_mem);
-    let want = sim::run(prog, &mut want_mem, got.final_cpu, &[], SimConfig::default())
-        .map_err(|e| fail(FailureKind::Sim(e)))?;
+    let want =
+        sim::run(env.prog, &mut want_mem, env.params, got.final_cpu, &[], SimConfig::default())
+            .map_err(|e| fail(FailureKind::Sim(e)))?;
     let want_obs = observe(&want_mem);
 
     if got.outcome != want.outcome {

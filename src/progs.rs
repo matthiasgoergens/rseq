@@ -53,14 +53,16 @@ pub fn freelist(nnodes: usize) -> Freelist {
 }
 
 impl Freelist {
-    /// Push `node` onto the current CPU's freelist.
-    #[must_use] 
-    pub fn push(&self, node: u64) -> Program {
+    /// Push the node given as runtime parameter 0 onto the current CPU's
+    /// freelist.
+    #[must_use]
+    pub fn push(&self) -> Program {
         let mut b = SeqBuilder::new("freelist_push");
         let cpu = b.cpu_id();
+        let node = b.param(0);
         let head = b.load(self.heads, reg(cpu));
-        b.store_scratch(self.nodes, imm(node), reg(head));
-        b.commit(self.heads, reg(cpu), imm(node))
+        b.store_scratch(self.nodes, reg(node), reg(head));
+        b.commit(self.heads, reg(cpu), reg(node))
     }
 
     /// Pop from the current CPU's freelist; exits early if empty, otherwise

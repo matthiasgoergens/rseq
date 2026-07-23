@@ -8,6 +8,8 @@
 //! ptrace-based conformance harness against the live kernel come next.
 
 pub mod check;
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+pub mod codegen;
 pub mod ir;
 pub mod progs;
 #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]

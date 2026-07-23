@@ -78,6 +78,10 @@ pub enum Op {
     /// demonstrate that the checker catches this bug class.
     CpuIdHoisted { dst: Reg },
     Const { dst: Reg, value: u64 },
+    /// Read runtime argument `index` (e.g. the node being pushed). Arguments
+    /// are fixed for the duration of a run, so re-reading after an abort is
+    /// safe by construction.
+    Param { dst: Reg, index: usize },
     Load { dst: Reg, addr: Addr },
     Bin { dst: Reg, op: BinOp, lhs: Operand, rhs: Operand },
     /// Early exit without committing (e.g. "freelist is empty").
@@ -212,7 +216,10 @@ impl Program {
                 _ => {}
             }
             match *op {
-                Op::CpuId { dst } | Op::CpuIdHoisted { dst } | Op::Const { dst, .. } => {
+                Op::CpuId { dst }
+                | Op::CpuIdHoisted { dst }
+                | Op::Const { dst, .. }
+                | Op::Param { dst, .. } => {
                     defined[dst] = true;
                 }
                 Op::Load { dst, addr } => {
@@ -271,7 +278,10 @@ impl Program {
         };
         for op in &self.ops {
             match *op {
-                Op::CpuId { dst } | Op::CpuIdHoisted { dst } | Op::Const { dst, .. } => {
+                Op::CpuId { dst }
+                | Op::CpuIdHoisted { dst }
+                | Op::Const { dst, .. }
+                | Op::Param { dst, .. } => {
                     regs.push(dst);
                 }
                 Op::Load { dst, addr } => {
@@ -336,6 +346,13 @@ impl SeqBuilder {
     pub fn constant(&mut self, value: u64) -> Reg {
         let dst = self.fresh();
         self.ops.push(Op::Const { dst, value });
+        dst
+    }
+
+    /// Read runtime argument `index`.
+    pub fn param(&mut self, index: usize) -> Reg {
+        let dst = self.fresh();
+        self.ops.push(Op::Param { dst, index });
         dst
     }
 
