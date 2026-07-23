@@ -24,6 +24,20 @@ fn counter_inc_survives_all_abort_schedules() {
 }
 
 #[test]
+fn strided_counter_survives_all_abort_schedules() {
+    let (layout, prog, counters) = progs::counter_inc_strided(8);
+    check::check(
+        &prog,
+        &layout,
+        no_setup,
+        |mem| mem.region(counters).to_vec(),
+        &[],
+        CheckConfig::default(),
+    )
+    .expect("counter_inc_strided must check");
+}
+
+#[test]
 fn hoisted_cpu_id_is_caught_as_foreign_commit() {
     let (layout, prog, counters) = progs::counter_inc_hoisted();
     let failure = check::check(

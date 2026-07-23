@@ -19,6 +19,22 @@ pub fn counter_inc() -> (Layout, Program, RegionId) {
     (layout, prog, counters)
 }
 
+/// Per-CPU counter increment with `words_per_cpu` stride, so each CPU's
+/// counter can occupy its own cache line (stride 8 words = 64 bytes). The
+/// benchmark uses this; the unit-stride version above false-shares.
+#[must_use]
+pub fn counter_inc_strided(words_per_cpu: usize) -> (Layout, Program, RegionId) {
+    let mut layout = Layout::new();
+    let counters = layout.published_per_cpu("counters", words_per_cpu, 0);
+    let mut b = SeqBuilder::new("counter_inc_strided");
+    let cpu = b.cpu_id();
+    let slot = b.bin(BinOp::Mul, reg(cpu), imm(words_per_cpu as u64));
+    let v = b.load(counters, reg(slot));
+    let inc = b.bin(BinOp::Add, reg(v), imm(1));
+    let prog = b.commit(counters, reg(slot), reg(inc));
+    (layout, prog, counters)
+}
+
 /// The hoisting bug: the CPU id is read once before the sequence and cached,
 /// so after a migration the commit targets the *old* CPU's counter.
 #[must_use] 

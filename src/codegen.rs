@@ -675,6 +675,25 @@ impl RegionSet {
         self.allocs[r.0].len()
     }
 
+    /// Benchmark-path call: like [`Self::call`] but with the per-call
+    /// asserts, the `current_area` lookup, and the `rseq_cs` disarm hoisted
+    /// out — the caller does them once per thread instead of once per call.
+    ///
+    /// # Safety
+    ///
+    /// `area` must be the calling thread's registered rseq area; `seq` must
+    /// have been compiled against this set's layout and need at most
+    /// `params.len()` parameters; the caller must clear `area->rseq_cs`
+    /// before `seq` is dropped.
+    pub unsafe fn call_cached(
+        &self,
+        seq: &CompiledSeq,
+        area: *mut RseqArea,
+        params: &[u64],
+    ) -> u64 {
+        unsafe { seq.call_raw(area, self.bases.as_ptr(), params.as_ptr()) }
+    }
+
     /// Quiescent access to a region (`&mut self`: no calls in flight).
     pub fn region_mut(&mut self, r: RegionId) -> &mut [u64] {
         let a = &mut self.allocs[r.0];

@@ -80,8 +80,27 @@ The design here is one IR with three backends:
   [tests/ptrace.rs](tests/ptrace.rs) — the deterministic abort-point
   conformance harness.
 
+5. **Benchmarks** (started): `src/bin/bench.rs`, a randomised complete block
+   design — each block samples θ = (affinity domain, thread count), runs
+   every arm once in randomised order, and appends to a CSV with continuing
+   block ids, so runs are start/stop-able anytime and results concatenate.
+   Analysis is paired within-block (median ratios vs the mutex baseline,
+   sign tests), never pooled means, so background-load drift cannot bias
+   the comparison. Domains include P-core-only and E-core-only masks on
+   hybrid machines (from `/sys/devices/cpu_core`/`cpu_atom`). Six arms
+   isolate one effect per adjacent pair: JIT vs hand-written asm (call
+   overhead), 64-byte vs 8-byte stride (false sharing), rseq vs per-CPU
+   `lock xadd` (the lock prefix), sharded vs shared atomic (contention),
+   and a `Mutex<u64>` baseline. First 100-block dataset on a 32-CPU Raptor
+   Lake box: rseq arms run 5-60x the mutex and 2-8x the sharded atomic in
+   every regime (unanimous within-block sign test), padding is worth ~2x at
+   high thread counts and nothing single-threaded, and abort rates are
+   ~2e-7 per op under oversubscription, zero otherwise.
+
 ## Running
 
 ```
 cargo test
+cargo run --release --bin bench -- counter --blocks 50   # appends bench-counter.csv
+cargo run --release --bin bench -- analyze bench-counter.csv
 ```
