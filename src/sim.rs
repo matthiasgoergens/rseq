@@ -15,6 +15,7 @@ pub struct Memory {
 }
 
 impl Memory {
+    #[must_use] 
     pub fn new(layout: &Layout, ncpus: usize) -> Self {
         let regions = layout
             .regions
@@ -27,14 +28,17 @@ impl Memory {
         Self { layout: layout.clone(), ncpus, regions }
     }
 
+    #[must_use] 
     pub fn ncpus(&self) -> usize {
         self.ncpus
     }
 
+    #[must_use] 
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
 
+    #[must_use] 
     pub fn region(&self, r: RegionId) -> &[u64] {
         &self.regions[r.0]
     }
@@ -64,6 +68,7 @@ impl Memory {
     }
 
     /// Snapshot of all published regions, for prefix-purity checks.
+    #[must_use] 
     pub fn published_snapshot(&self) -> Vec<(RegionId, Vec<u64>)> {
         self.layout
             .regions
@@ -124,6 +129,11 @@ pub struct RunResult {
 /// Run `prog` to completion, applying `plan` aborts in order. Each abort
 /// restarts the sequence from the top on `new_cpu`. Plan entries that never
 /// match (e.g. beyond an early exit) are simply unused.
+///
+/// # Errors
+///
+/// Returns a [`SimError`] on out-of-bounds access, a commit to another CPU's
+/// slice, an undefined register, or a CPU id outside the simulated range.
 pub fn run(
     prog: &Program,
     mem: &mut Memory,
@@ -180,6 +190,10 @@ pub fn run(
 /// Execute only `ops[0..k]` on `cpu`, then stop (as if the thread were
 /// preempted there and never resumed). Used for prefix-purity checking:
 /// no prefix that excludes the commit may change published memory.
+///
+/// # Errors
+///
+/// Same failure modes as [`run`].
 pub fn run_prefix(prog: &Program, mem: &mut Memory, cpu: usize, k: usize) -> Result<(), SimError> {
     if cpu >= mem.ncpus {
         return Err(SimError::BadCpu { cpu, ncpus: mem.ncpus });

@@ -12,16 +12,16 @@ use std::thread;
 use rseq::rt::{self, PerCpuCounter, PerCpuFreelist};
 
 fn threads() -> usize {
-    2 * thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    2 * thread::available_parallelism().map(std::num::NonZero::get).unwrap_or(4)
 }
 
 #[test]
 fn counter_stress_conserves_increments() {
+    const ITERS: u64 = 1_000_000;
     if rt::current_area().is_none() {
         eprintln!("rseq unavailable on this system; skipping");
         return;
     }
-    const ITERS: u64 = 1_000_000;
     let nthreads = threads();
     let mut counter = PerCpuCounter::new();
     let total_aborts: u64 = thread::scope(|s| {
@@ -46,12 +46,12 @@ fn counter_stress_conserves_increments() {
 
 #[test]
 fn freelist_stress_conserves_nodes() {
+    const NNODES: u64 = 512;
+    const ITERS: usize = 200_000;
     if rt::current_area().is_none() {
         eprintln!("rseq unavailable on this system; skipping");
         return;
     }
-    const NNODES: u64 = 512;
-    const ITERS: usize = 200_000;
     let nthreads = threads();
     let mut fl = PerCpuFreelist::new(NNODES as usize);
     // Seed: all nodes pushed from the main thread (whatever CPUs it lands on).

@@ -25,11 +25,13 @@ pub enum Operand {
 }
 
 /// Shorthand for `Operand::Reg`.
+#[must_use] 
 pub fn reg(r: Reg) -> Operand {
     Operand::Reg(r)
 }
 
 /// Shorthand for `Operand::Imm`.
+#[must_use] 
 pub fn imm(v: u64) -> Operand {
     Operand::Imm(v)
 }
@@ -114,6 +116,7 @@ pub struct Layout {
 }
 
 impl Layout {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -139,6 +142,7 @@ impl Layout {
         self.add(RegionDecl { name: name.into(), published: false, per_cpu: false, words, init })
     }
 
+    #[must_use] 
     pub fn decl(&self, r: RegionId) -> &RegionDecl {
         &self.regions[r.0]
     }
@@ -174,6 +178,12 @@ impl fmt::Display for ValidateError {
 
 impl Program {
     /// Check the structural invariants of a valid restartable sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first structural violation found: no/misplaced commit,
+    /// multiple exits, writes to the wrong region kind, or a register used
+    /// before it is defined.
     pub fn validate(&self, layout: &Layout) -> Result<(), ValidateError> {
         if self.ops.is_empty() {
             return Err(ValidateError::Empty);
@@ -262,7 +272,7 @@ impl Program {
         for op in &self.ops {
             match *op {
                 Op::CpuId { dst } | Op::CpuIdHoisted { dst } | Op::Const { dst, .. } => {
-                    regs.push(dst)
+                    regs.push(dst);
                 }
                 Op::Load { dst, addr } => {
                     regs.push(dst);
@@ -299,6 +309,7 @@ pub struct SeqBuilder {
 }
 
 impl SeqBuilder {
+    #[must_use] 
     pub fn new(name: &str) -> Self {
         Self { name: name.into(), ops: Vec::new(), next: 0 }
     }
@@ -348,10 +359,12 @@ impl SeqBuilder {
         self.ops.push(Op::StoreScratch { addr: Addr { region, index }, src });
     }
 
+    #[must_use] 
     pub fn commit(self, region: RegionId, index: Operand, src: Operand) -> Program {
         self.finish(region, index, src, None)
     }
 
+    #[must_use] 
     pub fn commit_ret(self, region: RegionId, index: Operand, src: Operand, ret: Operand) -> Program {
         self.finish(region, index, src, Some(ret))
     }

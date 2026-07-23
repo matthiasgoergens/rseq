@@ -40,6 +40,7 @@ unsafe extern "C" {
 
 /// The current thread's rseq area, or None if glibc did not register one
 /// (pre-2.35 glibc, or a kernel without rseq).
+#[must_use] 
 pub fn current_area() -> Option<*mut RseqArea> {
     unsafe {
         if __rseq_size == 0 {
@@ -189,6 +190,7 @@ pub struct PerCpuCounter {
 unsafe impl Sync for PerCpuCounter {}
 
 impl PerCpuCounter {
+    #[must_use] 
     pub fn new() -> Self {
         Self { slots: (0..MAX_CPUS).map(|_| UnsafeCell::new(0)).collect() }
     }
@@ -225,6 +227,7 @@ pub struct PerCpuFreelist {
 unsafe impl Sync for PerCpuFreelist {}
 
 impl PerCpuFreelist {
+    #[must_use] 
     pub fn new(nnodes: usize) -> Self {
         Self {
             heads: (0..MAX_CPUS).map(|_| UnsafeCell::new(NIL)).collect(),
@@ -235,6 +238,11 @@ impl PerCpuFreelist {
     /// Push `node` onto the current CPU's list. The caller must own `node`
     /// (popped earlier or never yet pushed) — that ownership is what makes
     /// the scratch write to `nodes[node]` unobservable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `node` is out of range for the pool.
+    #[must_use]
     pub fn push(&self, node: u64) -> bool {
         assert!((node as usize) < self.nodes.len());
         let Some(area) = current_area() else { return false };
@@ -252,6 +260,7 @@ impl PerCpuFreelist {
     /// Pop from the current CPU's list; None if it is empty (other CPUs'
     /// lists are not touched — cross-CPU draining needs the membarrier
     /// fence protocol, a later milestone).
+    #[must_use] 
     pub fn pop(&self) -> Option<u64> {
         let area = current_area()?;
         let node = unsafe {
@@ -265,6 +274,10 @@ impl PerCpuFreelist {
     }
 
     /// Walk every CPU's list. `&mut self` guarantees quiescence.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a list contains a cycle (which would mean a broken commit).
     pub fn drain_all(&mut self) -> Vec<Vec<u64>> {
         let nnodes = self.nodes.len();
         (0..MAX_CPUS)

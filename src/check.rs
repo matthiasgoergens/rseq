@@ -60,6 +60,12 @@ pub struct Stats {
 
 /// Exhaustively check `prog`. `setup` initialises memory before every run;
 /// `observe` extracts the state that other actors could legitimately see.
+///
+/// # Errors
+///
+/// Returns the first [`CheckFailure`] found: an invalid program, a simulator
+/// error (e.g. a foreign commit after migration), an outcome or observable
+/// divergence from the abort-free run, or an impure prefix.
 pub fn check<V, S, O>(
     prog: &Program,
     layout: &Layout,
